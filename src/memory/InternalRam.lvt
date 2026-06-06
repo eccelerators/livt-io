@@ -1,0 +1,13 @@
+namespace Livt.IO
+
+@Opaque
+component InternalRam
+{
+    public write_enable: in logic[1]
+    
+    public address: in logic[11]
+    
+    public write_data: in logic[8]
+    
+    public read_data: out logic[8]
+}

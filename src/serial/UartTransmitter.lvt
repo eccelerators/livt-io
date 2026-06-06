@@ -1,0 +1,100 @@
+namespace Livt.IO
+
+/**
+ * UartTransmitter
+ *
+ * Transmits 8-N-1 UART frames on `tx`. A pulse on `tx_dv` starts
+ * transmission of `tx_byte`, `tx_active` remains high while the frame
+ * is in flight, and `tx_done` pulses for one cycle on completion.
+ */
+component UartTransmitter
+{
+	public const TICKS_PER_BIT: int = 868
+
+	tx_dv: logic
+
+	tx_active: logic
+
+	tx: logic
+
+	tx_done: logic
+
+	tx_byte: logic[8]
+
+	new(
+		tx: out logic,
+		tx_dv: in logic,
+		tx_byte: in logic[8],
+		tx_active: out logic,
+		tx_done: out logic
+	) {
+		this.tx_dv = tx_dv
+		this.tx_byte = tx_byte
+
+		tx_active = this.tx_active
+		tx = this.tx
+		tx_done = this.tx_done
+	}
+
+	process Transmitter()
+	{
+		var clock_count = 0
+		var bit_index = 0
+		var tx_data = 0x00
+
+		state Idle {
+			this.tx_active = 0
+			this.tx = 1
+			this.tx_done = 0
+			clock_count = 0
+			bit_index = 0
+			if (this.tx_dv) {
+				tx_data = this.tx_byte
+				goto StartBit
+			} else {
+				goto Idle
+			}
+		}
+		state StartBit {
+			this.tx_active = 1
+			this.tx = 0
+			if (clock_count < TICKS_PER_BIT - 1) {
+				clock_count = clock_count + 1
+				goto StartBit
+			} else {
+				clock_count = 0
+				goto DataBits
+			}
+		}
+		state DataBits {
+			this.tx = tx_data[bit_index]
+			if (clock_count < TICKS_PER_BIT - 1) {
+				clock_count = clock_count + 1
+				goto DataBits
+			} else {
+				clock_count = 0
+				if (bit_index < 7) {
+					bit_index = bit_index + 1
+					goto DataBits
+				} else {
+					bit_index = 0
+					goto StopBit
+				}
+			}
+		}
+		state StopBit {
+			this.tx = 1
+			if (clock_count < TICKS_PER_BIT - 1) {
+				clock_count = clock_count + 1
+				goto StopBit
+			} else {
+				this.tx_done = 1
+				clock_count = 0
+				goto Cleanup
+			}
+		}
+		state Cleanup {
+			goto Idle
+		}
+	}
+}

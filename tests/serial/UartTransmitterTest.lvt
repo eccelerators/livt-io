@@ -1,0 +1,288 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component UartTransmitterTest
+{
+	transmitter: UartTransmitter
+
+	tx: logic
+
+	tx_dv: logic
+
+	tx_byte: byte
+
+	tx_active: logic
+
+	tx_done: logic
+
+	new()
+	{
+		this.transmitter = new UartTransmitter(
+			this.tx,
+			this.tx_dv,
+			this.tx_byte,
+			this.tx_active,
+			this.tx_done
+		)
+	}
+
+	@Test
+	fn TestTransmitter()
+	{
+		this.tx_byte = 0xAA
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 10)
+
+		assert this.tx == 0b1 // Idle state
+
+		// Wait for idle state
+		Simulation.Wait(10)
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestIdleState()
+	{
+		// Verify TX line is high when idle
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+		assert this.tx_done == 0b0
+
+		Simulation.Wait(100)
+
+		// Should remain idle
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestStartBit()
+	{
+		this.tx_byte = 0xAA
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// After triggering, should enter start bit state
+		Simulation.Wait(5)
+		assert this.tx_active == 0b1
+		assert this.tx == 0b0 // Start bit is low
+
+		// Should stay low for TICKS_PER_BIT cycles
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+		assert this.tx == 0b0 // Still in start bit
+
+		// Wait for transmission to complete and return to idle
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 10)
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestDataBitsTransmission()
+	{
+		// Test transmitting 0xAA (10101010 in binary)
+		this.tx_byte = 0xAA
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Skip start bit
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+
+		// Check each data bit (LSB first)
+		// 0xAA = 10101010, so LSB first: 0,1,0,1,0,1,0,1
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+		assert this.tx == 0b0 // Bit 0
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b1 // Bit 1
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b0 // Bit 2
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b1 // Bit 3
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b0 // Bit 4
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b1 // Bit 5
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b0 // Bit 6
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b1 // Bit 7
+
+		// Wait for stop bit and return to idle
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 2)
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestStopBit()
+	{
+		this.tx_byte = 0x00
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Skip start bit + 8 data bits
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 9)
+
+		// Should be in stop bit now
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+		assert this.tx == 0b1 // Stop bit is high
+		assert this.tx_active == 0b1 // Still active during stop bit
+
+		// Wait for transmission to complete and return to idle
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestTxDoneSignal()
+	{
+		this.tx_byte = 0x55
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Before transmission completes
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 5)
+		assert this.tx_done == 0b0
+
+		// Poll for tx_done signal in a window around expected completion
+		// Transmission takes: 1 start + 8 data + 1 stop = 10 bit periods
+		var done_seen = 0b0
+		state {
+			for (var i = 0; i < UartTransmitter.TICKS_PER_BIT * 6; i = i++) {
+				if (this.tx_done == 0b1) {
+					done_seen = 0b1
+				}
+			}
+		}
+
+		// Verify we saw the tx_done pulse
+		assert done_seen == 0b1
+
+		// Verify tx_done returns to 0
+		assert this.tx_done == 0b0
+
+		// Ensure back to idle
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestTxActiveSignal()
+	{
+		// Initially inactive
+		assert this.tx_active == 0b0
+
+		this.tx_byte = 0x42
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Should be active during transmission
+		Simulation.Wait(5)
+		assert this.tx_active == 0b1
+
+		// Should remain active throughout
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 5)
+		assert this.tx_active == 0b1
+
+		// Complete transmission
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 5)
+
+		// Should go inactive after cleanup
+		Simulation.Wait(5)
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestMultipleBytes()
+	{
+		// First byte
+		this.tx_byte = 0x12
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Wait for transmission to complete
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 10 + 5)
+		assert this.tx == 0b1 // Back to idle
+		assert this.tx_active == 0b0
+
+		// Second byte
+		this.tx_byte = 0x34
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Should start transmitting again
+		Simulation.Wait(5)
+		assert this.tx_active == 0b1
+		assert this.tx == 0b0 // Start bit
+
+		// Wait for completion
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 10)
+		assert this.tx == 0b1 // Back to idle
+	}
+
+	@Test
+	fn TestAllZeros()
+	{
+		this.tx_byte = 0x00
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Skip start bit
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+
+		// All data bits should be 0
+		for (var i = 0; i < 8; i = i + 1) {
+			Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+			assert this.tx == 0b0
+			Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+		}
+
+		// Stop bit should be 1
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+		assert this.tx == 0b1
+
+		// Wait for return to idle
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestAllOnes()
+	{
+		this.tx_byte = 0xFF
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Skip start bit
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+
+		// All data bits should be 1
+		for (var i = 0; i < 8; i = i + 1) {
+			Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+			assert this.tx == 0b1
+			Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+		}
+
+		// Stop bit should be 1
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT / 2)
+		assert this.tx == 0b1
+
+		// Wait for return to idle
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+}

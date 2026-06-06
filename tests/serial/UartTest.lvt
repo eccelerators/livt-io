@@ -1,0 +1,61 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component UartTest
+{
+	uart: Uart
+
+	loopback_line: logic = 0b1
+
+	new()
+	{
+		this.uart = new Uart(this.loopback_line, this.loopback_line)
+	}
+
+	@Test
+	fn TestSendQueuesWholeMessage()
+	{
+		var message = "Hi".Encode()
+		var sent = this.uart.Send(message)
+		assert sent == true
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 25)
+
+		assert this.uart.IsDataAvailable() == 0b1
+		assert this.uart.Receive() == 0x48
+		assert this.uart.Receive() == 0x69
+		assert this.uart.IsDataAvailable() == 0b0
+	}
+
+	@Test
+	fn TestSendRejectsOversizedMessage()
+	{
+		var message = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABC".Encode()
+		var sent = this.uart.Send(message)
+		assert sent == false
+		assert this.uart.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 25)
+		assert this.uart.IsDataAvailable() == 0b0
+	}
+
+	@Test
+	fn TestForwardsBufferedApi()
+	{
+		assert this.uart.GetAvailableBytes() == 0
+		assert this.uart.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+		assert this.uart.IsBusy() == false
+
+		assert this.uart.Transmit(0x33) == true
+		assert this.uart.Transmit(0x34) == true
+		assert this.uart.GetTransmitSpace() < BufferedUart.BUFFER_SIZE
+
+		this.uart.ClearTransmitBuffer()
+		assert this.uart.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+
+		this.uart.ClearReceiveBuffer()
+		assert this.uart.GetAvailableBytes() == 0
+	}
+}

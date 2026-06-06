@@ -1,0 +1,69 @@
+namespace Livt.IO
+
+/**
+ * Byte-addressable RAM wrapper backed by the opaque InternalRam primitive.
+ *
+ * Addresses 0..2047 select one of the 2048 stored bytes. Out-of-range reads
+ * return 0x00 and out-of-range writes are ignored.
+ */
+component Ram
+{
+	public const ADDRESS_WIDTH: int = 11
+	public const CAPACITY: int = 2048
+	public const MAX_ADDRESS: int = 2047
+
+	ram: InternalRam
+
+	new()
+	{
+		ram = new InternalRam()
+	}
+
+	/**
+	 * Returns true when address selects a byte in the RAM.
+	 */
+	public fn IsValidAddress(address: int) bool
+	{
+		var valid = false
+		if (address >= 0)
+		{
+			if (address <= MAX_ADDRESS)
+			{
+				valid = true
+			}
+		}
+		return valid
+	}
+
+	/**
+	 * Reads one byte from address.
+	 * Returns 0x00 when address is outside 0..2047.
+	 */
+	public fn ReadByte(address: int) byte
+	{
+		var result: byte = 0x00
+		if (this.IsValidAddress(address))
+		{
+			ram.address = address as logic[11]
+			result = ram.read_data
+		}
+		return result
+	}
+
+	/**
+	 * Writes one byte to address.
+	 * Invalid addresses are ignored.
+	 */
+	public fn WriteByte(address: int, value: byte)
+	{
+		if (this.IsValidAddress(address))
+		{
+			state {
+				ram.address = address as logic[11]
+				ram.write_data = value
+				ram.write_enable = 0b1
+			}
+			ram.write_enable = 0b0
+		}
+	}
+}

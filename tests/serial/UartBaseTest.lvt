@@ -1,0 +1,316 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component UartBaseTest
+{
+	uart: UartBase
+
+	rx: logic
+
+	tx: logic
+
+	tx_dv: logic
+
+	tx_byte: byte
+
+	tx_active: logic
+
+	tx_done: logic
+
+	rx_dv: logic
+
+	rx_byte: byte
+
+	rx_frame_error: logic
+
+	new()
+	{
+		this.rx = 0b1
+		this.uart = new UartBase(
+			this.rx,
+			this.tx,
+			this.tx_dv,
+			this.tx_byte,
+			this.tx_active,
+			this.tx_done,
+			this.rx_dv,
+			this.rx_byte,
+			this.rx_frame_error
+		)
+	}
+
+	@Test
+	fn TestTransmitData()
+	{
+		// Test transmitting a byte
+		this.tx_byte = 0xAA
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Should be transmitting
+		Simulation.Wait(10)
+		assert this.tx_active == 0b1
+
+		// Wait for transmission to complete
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 9)
+
+		// Check for tx_done pulse
+		var done_seen = 0b0
+		state {
+			for (var i = 0; i < UartTransmitter.TICKS_PER_BIT; i = i++) {
+				if (this.tx_done == 0b1) {
+					done_seen = 0b1
+				}
+			}
+		}
+		assert done_seen == 0b1
+
+		// Should be back to idle
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestReceiveData()
+	{
+		// Test receiving a byte (0x55)
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Send 0x55 = 01010101, LSB first: 1,0,1,0,1,0,1,0
+		this.rx = 0b1 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+
+		// Check for rx_dv pulse and received data
+		var dv_seen = 0b0
+		state {
+			for (var i = 0; i < UartReceiver.TICKS_PER_BIT; i = i + 1) {
+				if (this.rx_dv == 0b1) {
+					dv_seen = 0b1
+				}
+			}
+		}
+		assert dv_seen == 0b1
+		assert this.rx_byte == 0x55
+
+		// Should remain idle
+		assert this.rx == 0b1
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestInvalidStopBitRaisesFrameError()
+	{
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Send 0x5A = 01011010, LSB first: 0,1,0,1,1,0,1,0
+		this.rx = 0b0 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b0 // Invalid stop bit
+
+		var frame_error_seen = 0b0
+		var dv_seen = 0b0
+		state {
+			for (var i = 0; i < UartReceiver.TICKS_PER_BIT * 2; i = i + 1) {
+				if (this.rx_frame_error == 0b1) {
+					frame_error_seen = 0b1
+				}
+				if (this.rx_dv == 0b1) {
+					dv_seen = 0b1
+				}
+			}
+		}
+
+		assert frame_error_seen == 0b1
+		assert dv_seen == 0b0
+
+		this.rx = 0b1
+		Simulation.Wait(10)
+		assert this.rx_frame_error == 0b0
+	}
+
+	@Test
+	fn TestLoopback()
+	{
+		// Connect TX to RX for loopback test
+		// We'll manually set rx to follow tx
+
+		// Transmit 0x42
+		this.tx_byte = 0x42
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		// Wait a bit for start bit
+		Simulation.Wait(10)
+
+		// Now set rx to follow tx for the rest of transmission
+		// This simulates a loopback connection
+		// Start bit
+		this.rx = this.tx
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+
+		// Data bits
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = this.tx
+			Simulation.Wait(UartTransmitter.TICKS_PER_BIT)
+		}
+
+		// Stop bit
+		this.rx = this.tx
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 2)
+
+		// Check that receiver got the data
+		assert this.rx_byte == 0x42
+
+		// Check tx completed
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+	}
+
+	@Test
+	fn TestTransmitMultipleBytes()
+	{
+		// First byte
+		this.tx_byte = 0x12
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 11)
+
+		// Should be idle
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+
+		// Second byte
+		this.tx_byte = 0x34
+		this.tx_dv = 0b1
+		this.tx_dv = 0b0
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 11)
+
+		// Should be idle again
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+	}
+
+	@Test
+	fn TestReceiveMultipleBytes()
+	{
+		// First byte: 0xAB
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// 0xAB = 10101011, LSB first: 1,1,0,1,0,1,0,1
+		this.rx = 0b1 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.rx_byte == 0xAB
+
+		// Second byte: 0xCD
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// 0xCD = 11001101, LSB first: 1,0,1,1,0,0,1,1
+		this.rx = 0b1 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.rx_byte == 0xCD
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+	}
+
+	@Test
+	fn TestIdleState()
+	{
+		// Verify both TX and RX are idle initially
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		assert this.tx == 0b1
+		assert this.tx_active == 0b0
+		assert this.rx_dv == 0b0
+	}
+}

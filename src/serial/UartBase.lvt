@@ -1,0 +1,41 @@
+namespace Livt.IO
+
+/**
+ * UartBase
+ *
+ * Low-level UART composition layer that combines `UartReceiver` and
+ * `UartTransmitter` behind explicit control and status signals.
+ */
+component UartBase
+{
+	receiver: UartReceiver
+
+	transmitter: UartTransmitter
+
+	new(
+		rx: in logic,
+		tx: out logic,
+		tx_dv: in logic,
+		tx_byte: in logic[8],
+		tx_active: out logic,
+		tx_done: out logic,
+		rx_dv: out logic,
+		rx_byte: out logic[8],
+		rx_frame_error: out logic
+	)
+	{
+		this.receiver = new UartReceiver(
+			rx,
+			rx_dv,
+			rx_byte,
+			rx_frame_error
+		)
+		this.transmitter = new UartTransmitter(
+			tx,
+			tx_dv,
+			tx_byte,
+			tx_active,
+			tx_done
+		)
+	}
+}

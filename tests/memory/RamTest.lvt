@@ -1,0 +1,172 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component RamTest
+{
+	ram : Ram
+
+	new()
+	{
+		ram = new Ram()
+	}
+
+	@Test
+	fn TestWriteAndReadByte()
+	{
+		ram.WriteByte(0, 0b10101010)
+		
+		var value = ram.ReadByte(0)
+		assert(value == 0b10101010)
+	}
+
+	@Test
+	fn TestWriteAndReadMultipleBytes()
+	{
+		ram.WriteByte(0, 0b11110000)
+		ram.WriteByte(1, 0b00001111)
+		ram.WriteByte(10, 0b10101010)
+		
+		var value0 = ram.ReadByte(0)
+		var value1 = ram.ReadByte(1)
+		var value10 = ram.ReadByte(10)
+		
+		assert(value0 == 0b11110000)
+		assert(value1 == 0b00001111)
+		assert(value10 == 0b10101010)
+	}
+
+	@Test
+	fn TestOverwriteExistingValue()
+	{
+		ram.WriteByte(5, 0b11111111)
+		var initial = ram.ReadByte(5)
+		assert(initial == 0b11111111)
+		
+		ram.WriteByte(5, 0b00000000)
+		var updated = ram.ReadByte(5)
+		assert(updated == 0b00000000)
+		
+		ram.WriteByte(5, 0b10101010)
+		var finalValue = ram.ReadByte(5)
+		assert(finalValue == 0b10101010)
+	}
+
+	@Test
+	fn TestBoundaryAddresses()
+	{
+		ram.WriteByte(0, 0b00000001)
+		var addr0 = ram.ReadByte(0)
+		assert(addr0 == 0b00000001)
+		
+		ram.WriteByte(2047, 0b11111110)
+		var addr2047 = ram.ReadByte(2047)
+		assert(addr2047 == 0b11111110)
+		
+		var addr0Check = ram.ReadByte(0)
+		assert(addr0Check == 0b00000001)
+	}
+
+	@Test
+	fn TestAllZerosAndOnes()
+	{
+		ram.WriteByte(20, 0b00000000)
+		var zeros = ram.ReadByte(20)
+		assert(zeros == 0b00000000)
+		
+		ram.WriteByte(21, 0b11111111)
+		var ones = ram.ReadByte(21)
+		assert(ones == 0b11111111)
+	}
+
+	@Test
+	fn TestAlternatingBitPatterns()
+	{
+		ram.WriteByte(30, 0b01010101)
+		var pattern1 = ram.ReadByte(30)
+		assert(pattern1 == 0b01010101)
+		
+		ram.WriteByte(31, 0b10101010)
+		var pattern2 = ram.ReadByte(31)
+		assert(pattern2 == 0b10101010)
+	}
+
+	@Test
+	fn TestSequentialAddresses()
+	{
+		ram.WriteByte(100, 0b00000001)
+		ram.WriteByte(101, 0b00000010)
+		ram.WriteByte(102, 0b00000011)
+		ram.WriteByte(103, 0b00000100)
+		ram.WriteByte(104, 0b00000101)
+		
+		assert(ram.ReadByte(100) == 0b00000001)
+		assert(ram.ReadByte(101) == 0b00000010)
+		assert(ram.ReadByte(102) == 0b00000011)
+		assert(ram.ReadByte(103) == 0b00000100)
+		assert(ram.ReadByte(104) == 0b00000101)
+	}
+
+	@Test
+	fn TestDataIndependence()
+	{
+		ram.WriteByte(50, 0b11001100)
+		ram.WriteByte(51, 0b00110011)
+		ram.WriteByte(52, 0b11110000)
+		
+		var val50 = ram.ReadByte(50)
+		var val51 = ram.ReadByte(51)
+		var val52 = ram.ReadByte(52)
+		
+		assert(val50 == 0b11001100)
+		assert(val51 == 0b00110011)
+		assert(val52 == 0b11110000)
+		
+		ram.WriteByte(51, 0b10101010)
+		
+		assert(ram.ReadByte(50) == 0b11001100)
+		assert(ram.ReadByte(51) == 0b10101010)
+		assert(ram.ReadByte(52) == 0b11110000)
+	}
+
+	@Test
+	fn TestSparseAddressPattern()
+	{
+		ram.WriteByte(0, 0b00000001)
+		ram.WriteByte(512, 0b01000000)
+		ram.WriteByte(1024, 0b10000000)
+		ram.WriteByte(1536, 0b11000000)
+		ram.WriteByte(2047, 0b11111111)
+		
+		assert(ram.ReadByte(0) == 0b00000001)
+		assert(ram.ReadByte(512) == 0b01000000)
+		assert(ram.ReadByte(1024) == 0b10000000)
+		assert(ram.ReadByte(1536) == 0b11000000)
+		assert(ram.ReadByte(2047) == 0b11111111)
+	}
+
+	@Test
+	fn TestConstantsAndValidAddress()
+	{
+		assert(Ram.ADDRESS_WIDTH == 11)
+		assert(Ram.CAPACITY == 2048)
+		assert(Ram.MAX_ADDRESS == 2047)
+		assert(ram.IsValidAddress(0) == true)
+		assert(ram.IsValidAddress(2047) == true)
+		assert(ram.IsValidAddress(-1) == false)
+		assert(ram.IsValidAddress(2048) == false)
+	}
+
+	@Test
+	fn TestInvalidAddressesAreSafe()
+	{
+		ram.WriteByte(0, 0x5A)
+		ram.WriteByte(-1, 0xFF)
+		ram.WriteByte(2048, 0xFF)
+
+		assert(ram.ReadByte(-1) == 0x00)
+		assert(ram.ReadByte(2048) == 0x00)
+		assert(ram.ReadByte(0) == 0x5A)
+	}
+}

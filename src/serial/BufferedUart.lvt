@@ -1,0 +1,200 @@
+namespace Livt.IO
+
+/**
+ * BufferedUart - High-level UART controller with FIFO buffers
+ *
+ * Provides a software-friendly interface to the UartBase hardware component
+ * with automatic buffering for both transmit and receive operations.
+ *
+ * Features:
+ * - 64-byte transmit FIFO queue
+ * - 64-byte receive FIFO queue
+ * - Automatic transmission management
+ * - Status queries for buffer states
+ */
+component BufferedUart
+{
+	public const BUFFER_SIZE: int = 64
+
+	uart: UartBase
+
+	// Transmit queue - array of 64 bytes (64 elements, each 8 bits wide)
+	tx_queue: logic[64, 8]
+	tx_head: int
+	tx_tail: int
+	tx_count: int
+
+	// Receive queue - array of 64 bytes (64 elements, each 8 bits wide)
+	rx_queue: logic[64, 8]
+	rx_head: int
+	rx_tail: int
+	rx_count: int
+
+	frame_error_count: int
+
+	// Internal signals for UartBase
+	tx_dv: logic
+	tx_byte: logic[8]
+	tx_active: logic
+	tx_done: logic
+	rx_dv: logic
+	rx_byte: logic[8]
+	rx_frame_error: logic
+
+	new(rx: in logic, tx: out logic)
+	{
+		this.uart = new UartBase(
+			rx,
+			tx,
+			this.tx_dv,
+			this.tx_byte,
+			this.tx_active,
+			this.tx_done,
+			this.rx_dv,
+			this.rx_byte,
+			this.rx_frame_error
+		)
+		this.tx_head = 0
+		this.tx_tail = 0
+		this.tx_count = 0
+		this.rx_head = 0
+		this.rx_tail = 0
+		this.rx_count = 0
+		this.frame_error_count = 0
+	}
+
+	/**
+	 * Queues one byte for transmission. Returns `false` if the transmit FIFO is full.
+	 */
+	public fn Transmit(data: byte) bool
+	{
+		if (this.tx_count < BUFFER_SIZE) {
+			this.tx_queue[this.tx_head] = data as logic[8]
+			this.tx_head = (this.tx_head + 1) % BUFFER_SIZE
+			this.tx_count = this.tx_count + 1
+			return true
+		} else {
+			return false // Queue full
+		}
+	}
+
+	/**
+	 * Removes and returns the oldest received byte. Returns `0x00` when the receive FIFO is empty.
+	 */
+	public fn Receive() byte
+	{
+		if (this.rx_count > 0) {
+			var data: byte = this.rx_queue[this.rx_tail] as byte
+			this.rx_tail = (this.rx_tail + 1) % BUFFER_SIZE
+			this.rx_count = this.rx_count - 1
+			return data
+		} else {
+			return 0x00 // No data available
+		}
+	}
+
+	/**
+	 * Returns `true` when at least one received byte is available.
+	 */
+	public fn IsDataAvailable() bool
+	{
+		return this.rx_count > 0
+	}
+
+	/**
+	 * Returns `true` while the underlying transmitter is actively sending a frame.
+	 */
+	public fn IsBusy() bool
+	{
+		return this.tx_active
+	}
+
+	/**
+	 * Returns the number of bytes currently stored in the receive FIFO.
+	 */
+	public fn GetAvailableBytes() int
+	{
+		return this.rx_count
+	}
+
+	/**
+	 * Returns the remaining free capacity in the transmit FIFO.
+	 */
+	public fn GetTransmitSpace() int
+	{
+		return BUFFER_SIZE - this.tx_count
+	}
+
+	/**
+	 * Returns `true` when one or more framing errors have been recorded.
+	 */
+	public fn HasFrameError() bool
+	{
+		return this.frame_error_count > 0
+	}
+
+	/**
+	 * Returns the number of framing errors recorded since the last clear.
+	 */
+	public fn GetFrameErrorCount() int
+	{
+		return this.frame_error_count
+	}
+
+	/**
+	 * Removes all pending bytes from the receive FIFO.
+	 */
+	public fn ClearReceiveBuffer()
+	{
+		this.rx_head = 0
+		this.rx_tail = 0
+		this.rx_count = 0
+	}
+
+	/**
+	 * Removes all queued bytes from the transmit FIFO. A frame already in flight is unaffected.
+	 */
+	public fn ClearTransmitBuffer()
+	{
+		this.tx_head = 0
+		this.tx_tail = 0
+		this.tx_count = 0
+	}
+
+	/**
+	 * Clears the accumulated framing-error count.
+	 */
+	public fn ClearFrameErrors()
+	{
+		this.frame_error_count = 0
+	}
+
+	process HandleTransmitQueue()
+	{
+		if (this.tx_active == 0 && this.tx_count > 0) {
+			// Start transmitting next byte
+			this.tx_byte = this.tx_queue[this.tx_tail]
+			this.tx_tail = (this.tx_tail + 1) % BUFFER_SIZE
+			this.tx_count = this.tx_count - 1
+			this.tx_dv = 0b1
+			this.tx_dv = 0b0
+		}
+	}
+
+	process HandleReceiveQueue()
+	{
+		if (this.rx_dv == 0b1 && this.rx_count < BUFFER_SIZE) {
+			// Frames received while the FIFO is full are dropped.
+			this.rx_queue[this.rx_head] = this.rx_byte
+			this.rx_head = (this.rx_head + 1) % BUFFER_SIZE
+			this.rx_count = this.rx_count + 1
+		}
+	}
+
+	process CountFrameErrors()
+	{
+		if (this.rx_frame_error == 0b1) {
+			this.frame_error_count = this.frame_error_count + 1
+		}
+	}
+}

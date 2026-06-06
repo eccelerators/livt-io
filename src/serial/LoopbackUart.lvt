@@ -1,0 +1,113 @@
+namespace Livt.IO
+
+/**
+ * LoopbackUart
+ *
+ * Serial loopback UART wrapper that internally connects TX back to RX.
+ * It provides the same high-level API as `BufferedUart` while allowing
+ * transmitted bytes to flow back through the receive path.
+ */
+component LoopbackUart
+{
+	uart: BufferedUart
+
+	// Internal line shared by both the RX input and TX output.
+	loopback_line: logic
+
+	new()
+	{
+		// Connect both sides of the UART to the same internal line.
+		this.uart = new BufferedUart(
+			this.loopback_line,  // rx input
+			this.loopback_line   // tx output
+		)
+	}
+
+	/**
+	 * Queues one byte for transmission through the loopback path.
+	 */
+	public fn Transmit(data: byte) bool
+	{
+		return this.uart.Transmit(data)
+	}
+
+	/**
+	 * Removes and returns the oldest received byte.
+	 */
+	public fn Receive() byte
+	{
+		return this.uart.Receive()
+	}
+
+	/**
+	 * Returns `true` when looped-back data is available to read.
+	 */
+	public fn IsDataAvailable() bool
+	{
+		return this.uart.IsDataAvailable()
+	}
+
+	/**
+	 * Returns the number of bytes currently stored in the receive FIFO.
+	 */
+	public fn GetAvailableBytes() int
+	{
+		return this.uart.GetAvailableBytes()
+	}
+
+	/**
+	 * Returns the remaining free capacity in the transmit FIFO.
+	 */
+	public fn GetTransmitSpace() int
+	{
+		return this.uart.GetTransmitSpace()
+	}
+
+	/**
+	 * Returns `true` while the underlying transmitter is actively sending a frame.
+	 */
+	public fn IsBusy() bool
+	{
+		return this.uart.IsBusy()
+	}
+
+	/**
+	 * Returns `true` when one or more framing errors have been recorded.
+	 */
+	public fn HasFrameError() bool
+	{
+		return this.uart.HasFrameError()
+	}
+
+	/**
+	 * Returns the number of recorded framing errors.
+	 */
+	public fn GetFrameErrorCount() int
+	{
+		return this.uart.GetFrameErrorCount()
+	}
+
+	/**
+	 * Removes all pending bytes from the receive FIFO.
+	 */
+	public fn ClearReceiveBuffer()
+	{
+		this.uart.ClearReceiveBuffer()
+	}
+
+	/**
+	 * Removes all queued bytes from the transmit FIFO.
+	 */
+	public fn ClearTransmitBuffer()
+	{
+		this.uart.ClearTransmitBuffer()
+	}
+
+	/**
+	 * Clears the recorded framing-error count.
+	 */
+	public fn ClearFrameErrors()
+	{
+		this.uart.ClearFrameErrors()
+	}
+}

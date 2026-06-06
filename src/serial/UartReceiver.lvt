@@ -1,0 +1,148 @@
+namespace Livt.IO
+
+/**
+ * UartReceiver
+ *
+ * Receives 8-N-1 UART frames from `rx` and produces a one-cycle `rx_dv`
+ * pulse when a valid byte has been decoded. If the stop bit is invalid,
+ * the frame is rejected and `rx_frame_error` pulses instead.
+ */
+component UartReceiver
+{
+	public const TICKS_PER_BIT: int = 868
+
+	const START_BIT: logic = 0b0
+
+	const STOP_BIT: logic = 0b1
+
+	rx: logic
+
+	rx_tmp: logic
+
+	rx_data: logic
+
+	rx_byte: logic[8]
+
+	rx_dv: logic
+
+	rx_frame_error: logic
+
+	new(rx: in logic, rx_dv: out logic, rx_byte: out logic[8], rx_frame_error: out logic)
+	{
+		this.rx = rx
+
+		rx_dv = this.rx_dv
+		rx_byte = this.rx_byte
+		rx_frame_error = this.rx_frame_error
+	}
+
+	/**
+	 * Returns the current receive-data-valid pulse.
+	 */
+	public fn IsDataValid() logic
+	{
+		return this.rx_dv
+	}
+
+	/**
+	 * Returns the most recently received byte.
+	 */
+	public fn GetData() byte
+	{
+		return this.rx_byte as byte
+	}
+
+	/**
+	 * Returns the current framing-error pulse.
+	 */
+	public fn IsFrameError() logic
+	{
+		return this.rx_frame_error
+	}
+
+	// Double-register the asynchronous input before sampling it in the receiver state machine.
+	process DoubleRegisterData()
+	{
+		state {
+			this.rx_tmp = this.rx
+			this.rx_data = this.rx_tmp
+		}
+	}
+
+	process Receiver()
+	{
+		var clock_count: int = 0
+		var bit_index: int = 0
+
+		state Idle {
+			clock_count = 0
+			bit_index = 0
+			this.rx_dv = 0
+			this.rx_frame_error = 0
+			if (this.rx_data == START_BIT) {
+				goto Receiving
+			} else {
+				goto Idle
+			}
+		}
+		state Receiving {
+			if (clock_count == (TICKS_PER_BIT / 2)) {
+				if (this.rx_data == 0) {
+					clock_count = 0
+					goto DataBits
+				} else {
+					goto Idle
+				}
+			} else {
+				clock_count++
+				goto Receiving
+			}
+		}
+		state DataBits {
+			if (clock_count < TICKS_PER_BIT - 1) {
+				clock_count++
+				goto DataBits
+			} else {
+				clock_count = 0
+				this.rx_byte[bit_index] = this.rx_data
+				if (bit_index < 7) {
+					bit_index++
+					goto DataBits
+				} else {
+					bit_index = 0
+					goto StopBit
+				}
+			}
+		}
+		state StopBit {
+			if (clock_count < TICKS_PER_BIT - 1) {
+				clock_count = clock_count + 1
+				goto StopBit
+			} else {
+				clock_count = 0
+				if (this.rx_data == STOP_BIT) {
+					this.rx_dv = 1
+					goto Cleanup
+				} else {
+					this.rx_frame_error = 1
+					goto WaitForIdle
+				}
+			}
+		}
+		state WaitForIdle {
+			// After a framing error, wait for the line to return to idle-high before
+			// accepting a new start bit. This prevents immediately re-arming on a low line.
+			this.rx_frame_error = 0
+			if (this.rx_data == STOP_BIT) {
+				goto Idle
+			} else {
+				goto WaitForIdle
+			}
+		}
+		state Cleanup {
+			this.rx_dv = 0
+			this.rx_frame_error = 0
+			goto Idle
+		}
+	}
+}

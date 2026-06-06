@@ -1,0 +1,127 @@
+namespace Livt.IO
+
+/**
+ * Application-friendly UART wrapper around BufferedUart.
+ *
+ * Provides byte transmit/receive helpers, buffer status, clear operations, and
+ * an all-or-nothing Send helper for fixed byte arrays.
+ */
+component Uart
+{
+	uart: BufferedUart
+
+	new(rx: in logic, tx: out logic)
+	{
+		uart = new BufferedUart(rx, tx)
+	}
+
+	/**
+	 * Returns true when at least one received byte is available.
+	 */
+	public fn IsDataAvailable() bool
+	{
+		return uart.IsDataAvailable()
+	}
+
+	/**
+	 * Removes and returns the oldest received byte.
+	 * Returns 0x00 when the receive FIFO is empty.
+	 */
+	public fn Receive() byte
+	{
+		return uart.Receive()
+	}
+
+	/**
+	 * Queues one byte for transmission.
+	 * Returns false when the transmit FIFO is full.
+	 */
+	public fn Transmit(data: byte) bool
+	{
+		return uart.Transmit(data)
+	}
+
+	/**
+	 * Returns true while the underlying transmitter is sending a frame.
+	 */
+	public fn IsBusy() bool
+	{
+		return uart.IsBusy()
+	}
+
+	/**
+	 * Returns the number of bytes currently stored in the receive FIFO.
+	 */
+	public fn GetAvailableBytes() int
+	{
+		return uart.GetAvailableBytes()
+	}
+
+	/**
+	 * Returns the remaining free capacity in the transmit FIFO.
+	 */
+	public fn GetTransmitSpace() int
+	{
+		return uart.GetTransmitSpace()
+	}
+
+	/**
+	 * Returns true when one or more framing errors have been recorded.
+	 */
+	public fn HasFrameError() bool
+	{
+		return uart.HasFrameError()
+	}
+
+	/**
+	 * Returns the number of recorded framing errors.
+	 */
+	public fn GetFrameErrorCount() int
+	{
+		return uart.GetFrameErrorCount()
+	}
+
+	/**
+	 * Removes all pending bytes from the receive FIFO.
+	 */
+	public fn ClearReceiveBuffer()
+	{
+		uart.ClearReceiveBuffer()
+	}
+
+	/**
+	 * Removes all queued bytes from the transmit FIFO.
+	 * A byte already in flight is unaffected.
+	 */
+	public fn ClearTransmitBuffer()
+	{
+		uart.ClearTransmitBuffer()
+	}
+
+	/**
+	 * Clears the recorded framing-error count.
+	 */
+	public fn ClearFrameErrors()
+	{
+		uart.ClearFrameErrors()
+	}
+
+	/**
+	 * Queues the full byte array only if there is enough transmit space.
+	 * Returns false and leaves the queue unchanged when the message does not fit.
+	 */
+	public fn Send(data: byte[]) bool
+	{
+		if (data.Length() > uart.GetTransmitSpace()) {
+			return false
+		}
+
+		for (var i = 0; i < data.Length(); i++) {
+			if (uart.Transmit(data[i]) == false) {
+				return false
+			}
+		}
+
+		return true
+	}
+}

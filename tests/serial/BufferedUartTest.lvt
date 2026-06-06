@@ -1,0 +1,461 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component BufferedUartTest
+{
+	controller: BufferedUart
+
+	loopback_uart: BufferedUart
+
+	rx: logic = 0b1
+
+	tx: logic
+
+	loopback_rx: logic = 0b1
+
+	loopback_tx: logic
+
+	new()
+	{
+		this.controller = new BufferedUart(this.rx, this.tx)
+
+		this.loopback_rx = this.loopback_tx
+		this.loopback_uart = new BufferedUart(this.loopback_rx, this.loopback_tx)
+	}
+
+	@Test
+	fn TestInitialState()
+	{
+		// Verify initial state
+		assert this.controller.GetAvailableBytes() == 0
+		assert this.controller.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+		assert this.controller.IsDataAvailable() == 0b0
+		assert this.controller.IsBusy() == 0b0
+	}
+
+	@Test
+	fn TestTransmitSingleByte()
+	{
+		// Queue a byte for transmission
+		var result = this.controller.Transmit(0xAA)
+		assert result == true // Should succeed
+
+		// Wait for automatic transmission to start and complete
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 15)
+
+		// Check transmission occurred (tx line should be back to idle)
+		assert this.tx == 0b1
+
+		// Buffer should be empty again
+		Simulation.Wait(10)
+		assert this.controller.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+	}
+
+	@Test
+	fn TestTransmitMultipleBytes()
+	{
+		// Queue multiple bytes
+		assert this.controller.Transmit(0x12) == 0b1
+		assert this.controller.Transmit(0x34) == 0b1
+		assert this.controller.Transmit(0x56) == 0b1
+
+		// Check buffer usage
+		assert this.controller.GetTransmitSpace() > 0
+
+		// Wait for all transmissions to complete
+		// Each byte takes ~10 bit periods
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 35)
+
+		// All should be transmitted
+		assert this.tx == 0b1
+		Simulation.Wait(10)
+		assert this.controller.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+	}
+
+	@Test
+	fn TestTransmitBufferFull()
+	{
+		// Fill the buffer in a tight loop (faster than transmission)
+		for (var i = 0; i < BufferedUart.BUFFER_SIZE + 1; i = i++) {
+			var result = this.controller.Transmit(0x55)
+			assert result == 0b1
+		}
+
+		// Buffer should be full
+		assert this.controller.GetTransmitSpace() == 0
+
+		// Buffer should be full NOW (first byte still transmitting)
+		// Try immediately without waiting
+		var overflow_result = this.controller.Transmit(0xFF)
+		assert overflow_result == 0b0
+
+		// Wait for buffer to drain completely
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * ((BufferedUart.BUFFER_SIZE + 2) * 12))
+		assert this.controller.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+	}
+
+	@Test
+	fn TestReceiveSingleByte()
+	{
+		// Initially no data available
+		assert this.controller.IsDataAvailable() == 0b0
+
+		// Send a byte on RX line (0x55)
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Send 0x55 = 01010101, LSB first: 1,0,1,0,1,0,1,0
+		this.rx = 0b1 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		// Data should be available
+		assert this.controller.IsDataAvailable() == 0b1
+		assert this.controller.GetAvailableBytes() == 1
+
+		// Receive the byte
+		var data = this.controller.Receive()
+		assert data == 0x55
+
+		// No more data available
+		assert this.controller.IsDataAvailable() == 0b0
+		assert this.controller.GetAvailableBytes() == 0
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+	}
+
+	@Test
+	fn TestReceiveMultipleBytes()
+	{
+		// Send first byte (0xAA)
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// 0xAA = 10101010, LSB first: 0,1,0,1,0,1,0,1
+		this.rx = 0b0 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		// Send second byte (0x55)
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// 0x55 = 01010101, LSB first: 1,0,1,0,1,0,1,0
+		this.rx = 0b1 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		// Should have 2 bytes available
+		assert this.controller.GetAvailableBytes() == 2
+
+		// Receive in order
+		var byte1 = this.controller.Receive()
+		assert byte1 == 0xAA
+
+		var byte2 = this.controller.Receive()
+		assert byte2 == 0x55
+
+		// Buffer should be empty
+		assert this.controller.GetAvailableBytes() == 0
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+	}
+
+	@Test
+	fn TestReceiveBufferFull()
+	{
+		// Fill receive buffer by sending BUFFER_SIZE bytes
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		for (var i = 0; i < BufferedUart.BUFFER_SIZE; i = i + 1) {
+			// Send a byte (value = i)
+			this.rx = 0b0 // Start bit
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+			// Send 8 data bits (all zeros for simplicity)
+			for (var j = 0; j < 8; j = j + 1) {
+				this.rx = 0b0
+				Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+			}
+
+			this.rx = 0b1 // Stop bit
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+		}
+
+		// Buffer should be full
+		assert this.controller.GetAvailableBytes() == BufferedUart.BUFFER_SIZE
+
+		// Send one more byte - should be dropped
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		for (var j = 0; j < 8; j = j + 1) {
+			this.rx = 0b1 // Send 0xFF
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		}
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		// Still should have only BUFFER_SIZE bytes
+		assert this.controller.GetAvailableBytes() == BufferedUart.BUFFER_SIZE
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+	}
+
+	@Test
+	fn TestFrameErrorDoesNotQueueData()
+	{
+		this.controller.ClearReceiveBuffer()
+		this.controller.ClearFrameErrors()
+
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Send 0xC3 = 11000011, LSB first: 1,1,0,0,0,0,1,1
+		this.rx = 0b1 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b0 // Invalid stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.controller.GetAvailableBytes() == 0
+		assert this.controller.HasFrameError() == 0b1
+		assert this.controller.GetFrameErrorCount() == 1
+
+		this.rx = 0b1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		// Send a valid frame to confirm recovery.
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Send 0x3C = 00111100, LSB first: 0,0,1,1,1,1,0,0
+		this.rx = 0b0 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.controller.GetAvailableBytes() == 1
+		assert this.controller.Receive() == 0x3C
+		assert this.controller.GetFrameErrorCount() == 1
+	}
+
+	@Test
+	fn TestClearReceiveBuffer()
+	{
+		this.controller.ClearReceiveBuffer()
+
+		// Send a byte
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = 0b1
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		}
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		// Should have data
+		assert this.controller.GetAvailableBytes() == 1
+
+		// Clear buffer
+		this.controller.ClearReceiveBuffer()
+
+		// Should be empty
+		assert this.controller.GetAvailableBytes() == 0
+		assert this.controller.IsDataAvailable() == 0b0
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+	}
+
+	@Test
+	fn TestClearTransmitBuffer()
+	{
+		// Queue some bytes
+		this.controller.Transmit(0x12)
+		this.controller.Transmit(0x34)
+
+		// Wait a tiny bit (not enough to transmit)
+		Simulation.Wait(10)
+
+		// Clear transmit buffer
+		this.controller.ClearTransmitBuffer()
+
+		// Buffer should be empty
+		assert this.controller.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+
+		// Wait to ensure nothing transmits
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 25)
+
+		// Should still be idle
+		assert this.tx == 0b1
+	}
+
+	@Test
+	fn TestReceiveEmptyBuffer()
+	{
+		this.controller.ClearReceiveBuffer()
+
+		// Try to receive from empty buffer
+		assert this.controller.IsDataAvailable() == 0b0
+
+		var data = this.controller.Receive()
+		// Should return 0x00 when buffer is empty
+		assert data == 0x00
+
+		// Buffer should still be empty
+		assert this.controller.GetAvailableBytes() == 0
+	}
+
+	@Test
+	fn TestClearFrameErrors()
+	{
+		this.controller.ClearFrameErrors()
+
+		// Create a framing error.
+		this.rx = 0b1
+		Simulation.Wait(100)
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = 0b0
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		}
+		this.rx = 0b0 // Invalid stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.controller.HasFrameError() == 0b1
+		assert this.controller.GetFrameErrorCount() == 1
+
+		this.controller.ClearFrameErrors()
+
+		assert this.controller.HasFrameError() == 0b0
+		assert this.controller.GetFrameErrorCount() == 0
+
+		this.rx = 0b1
+		Simulation.Wait(10)
+	}
+
+	@Test
+	fn TestLoopbackTransmitReceive()
+	{
+		this.loopback_uart.ClearReceiveBuffer()
+		this.loopback_uart.ClearTransmitBuffer()
+
+		// Transmit a byte
+		this.loopback_uart.Transmit(0x42)
+
+		// Wait for transmission to start
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 9)
+
+		// Wait a bit more for reception to complete
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		// Should have received the byte
+		assert this.loopback_uart.IsDataAvailable() == 0b1
+		var received = this.loopback_uart.Receive()
+		assert received == 0x42
+	}
+}

@@ -1,0 +1,23 @@
+[project]
+name = "Livt.IO"
+version = "0.1.0"
+path = "src"
+outdir = "out"
+
+[tests]
+path = "tests"
+components = [
+    "RamTest",
+    "UartReceiverTest",
+    "UartTransmitterTest",
+    "UartBaseTest",
+    "BufferedUartTest",
+    "UartTest",
+    "LoopbackUartTest"
+]
+
+[build.debug]
+warnings = ["all", "no-variable-divisor"]
+
+[build.release]
+warnings = ["all"]

@@ -1,0 +1,492 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component UartReceiverTest
+{
+	receiver : UartReceiver
+
+	rx: logic
+
+	rx_dv: logic
+
+	rx_byte: byte
+
+	rx_frame_error: logic
+
+	new()
+	{
+		this.rx = 0b1
+		this.receiver = new UartReceiver(this.rx, this.rx_dv, this.rx_byte, this.rx_frame_error)
+	}
+
+	@Test
+	fn TestReceiver()
+	{
+		this.rx = 0b1 // No data
+		Simulation.Wait(1000)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		assert this.receiver.GetData() == 0x55
+
+		// Wait for idle
+		Simulation.Wait(10)
+		this.rx = 0b1
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestIdleState()
+	{
+		// Verify receiver stays idle when RX line is high
+		this.rx = 0b1
+		assert this.rx_dv == 0b0
+
+		Simulation.Wait(100)
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestStartBitDetection()
+	{
+		// Line high (idle)
+		this.rx = 0b1
+		Simulation.Wait(100)
+		assert this.rx_dv == 0b0
+
+		// Pull line low to trigger start bit detection
+		this.rx = 0b0
+		Simulation.Wait(10)
+
+		// Should have detected start bit and begun receiving
+		// rx_dv should still be 0 during reception
+		assert this.rx_dv == 0b0
+
+		// Complete a valid byte to avoid leaving receiver in bad state
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = 0b0
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		}
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+		this.rx = 0b1
+
+		// Should return to idle, no data valid
+		Simulation.Wait(100)
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestFalseStartRejection()
+	{
+		// Start with idle
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		// Pull low (start bit)
+		this.rx = 0b0
+		Simulation.Wait(10)
+
+		// But then go high again before mid-bit check
+		// This should be rejected as a false start
+		this.rx = 0b1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Should return to idle, no data valid
+		Simulation.Wait(100)
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestDataReception()
+	{
+		// Send 0xAA (10101010 binary, LSB first: 0,1,0,1,0,1,0,1)
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Send bits LSB first
+		this.rx = 0b0 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Check received data
+		assert this.receiver.GetData() == 0xAA
+
+		// Wait for idle
+		Simulation.Wait(10)
+		this.rx = 0b1
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestRxDvSignal()
+	{
+		// rx_dv should be low initially
+		this.rx = 0b1
+		Simulation.Wait(100)
+		assert this.rx_dv == 0b0
+
+		// Send a byte
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// During data reception, rx_dv should remain low
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = 0b1
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT / 2)
+			assert this.rx_dv == 0b0
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT / 2)
+		}
+
+		this.rx = 0b1 // Stop bit
+
+		// After stop bit, rx_dv should pulse high
+		// Use polling to catch the pulse
+		var dv_seen = 0b0
+		state {
+			for (var i = 0; i < UartReceiver.TICKS_PER_BIT; i = i++) {
+				if (this.rx_dv == 0b1) {
+					dv_seen = 0b1
+				}
+			}
+		}
+		assert dv_seen == 0b1
+
+		// Wait for idle
+		Simulation.Wait(10)
+		this.rx = 0b1
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestInvalidStopBitTriggersFrameError()
+	{
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Send 0xA5 = 10100101, LSB first: 1,0,1,0,0,1,0,1
+		this.rx = 0b1 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b0 // Invalid stop bit
+
+		var frame_error_seen = 0b0
+		var dv_seen = 0b0
+		state {
+			for (var i = 0; i < UartReceiver.TICKS_PER_BIT * 2; i = i + 1) {
+				if (this.rx_frame_error == 0b1) {
+					frame_error_seen = 0b1
+				}
+				if (this.rx_dv == 0b1) {
+					dv_seen = 0b1
+				}
+			}
+		}
+
+		assert frame_error_seen == 0b1
+		assert dv_seen == 0b0
+
+		this.rx = 0b1
+		Simulation.Wait(10)
+		assert this.rx_frame_error == 0b0
+	}
+
+	@Test
+	fn TestRecoveryAfterFrameError()
+	{
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		// Send a malformed frame with an invalid stop bit.
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = 0b0
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		}
+		this.rx = 0b0 // Invalid stop bit
+
+		var frame_error_seen = 0b0
+		state {
+			for (var i = 0; i < UartReceiver.TICKS_PER_BIT * 2; i = i + 1) {
+				if (this.rx_frame_error == 0b1) {
+					frame_error_seen = 0b1
+				}
+			}
+		}
+		assert frame_error_seen == 0b1
+
+		// Return to idle before sending the next valid frame.
+		this.rx = 0b1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		// Send 0x3C = 00111100, LSB first: 0,0,1,1,1,1,0,0
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Stop bit
+
+		var dv_seen = 0b0
+		state {
+			for (var i = 0; i < UartReceiver.TICKS_PER_BIT * 2; i = i + 1) {
+				if (this.rx_dv == 0b1) {
+					dv_seen = 0b1
+				}
+			}
+		}
+
+		assert dv_seen == 0b1
+		assert this.receiver.GetData() == 0x3C
+
+		this.rx = 0b1
+		Simulation.Wait(10)
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestMultipleBytes()
+	{
+		// First byte: 0x12
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// 0x12 = 00010010, LSB first: 0,1,0,0,1,0,0,0
+		this.rx = 0b0 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.receiver.GetData() == 0x12
+
+		// Second byte: 0x34
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// 0x34 = 00110100, LSB first: 0,0,1,0,1,1,0,0
+		this.rx = 0b0 // Bit 0
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 1
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 2
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 3
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 4
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b1 // Bit 5
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 6
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		this.rx = 0b0 // Bit 7
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.receiver.GetData() == 0x34
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestAllZeros()
+	{
+		// Send 0x00
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// All bits are 0
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = 0b0
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		}
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.receiver.GetData() == 0x00
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestAllOnes()
+	{
+		// Send 0xFF
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// All bits are 1
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = 0b1
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		}
+
+		this.rx = 0b1 // Stop bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+
+		assert this.receiver.GetData() == 0xFF
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+
+	@Test
+	fn TestStopBitValidation()
+	{
+		// Send a valid byte with proper stop bit
+		this.rx = 0b1
+		Simulation.Wait(100)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+		// Send 0x42
+		for (var i = 0; i < 8; i = i + 1) {
+			this.rx = 0b0
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+		}
+
+		// Proper stop bit (high)
+		this.rx = 0b1
+
+		// Should have valid data
+		var dv_seen = 0b0
+		state {
+			for (var i = 0; i < UartReceiver.TICKS_PER_BIT; i = i++) {
+				if (this.rx_dv == 0b1) {
+					dv_seen = 0b1
+				}
+			}
+		}
+		assert dv_seen == 0b1
+
+		// Return to idle
+		this.rx = 0b1
+		Simulation.Wait(10)
+
+		// Should remain idle
+		assert this.rx_dv == 0b0
+	}
+}
