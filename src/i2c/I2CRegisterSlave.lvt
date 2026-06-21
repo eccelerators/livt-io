@@ -1,0 +1,206 @@
+namespace Livt.IO
+
+/**
+ * Register-file helper built on top of `I2CSlave`.
+ *
+ * The first byte written after an address match selects the register pointer.
+ * Later write bytes store into the selected register and advance the pointer.
+ * A read-address request loads the current register value and preloads the next
+ * register value so ACKed multi-byte reads can auto-increment.
+ */
+component I2CRegisterSlave
+{
+	public const REGISTER_COUNT: int = 256
+
+	slave: I2CSlave
+	registers: byte[256]
+	pointer: int
+	pointerValid: bool
+	expectingPointer: bool
+	writtenRegister: byte
+	writtenValue: byte
+	hasWrittenRegister: bool
+
+	new(bus: flip I2CBus, address: byte)
+	{
+		this.slave = new I2CSlave(bus, address)
+		this.pointer = 0
+		this.pointerValid = false
+		this.expectingPointer = false
+		this.writtenRegister = 0x00
+		this.writtenValue = 0x00
+		this.hasWrittenRegister = false
+	}
+
+	public fn SetRegister(address: byte, value: byte)
+	{
+		var index: int = address as int
+		state {
+			this.registers[index] = value
+		}
+	}
+
+	public fn GetRegister(address: byte) byte
+	{
+		var index: int = address as int
+		return this.registers[index]
+	}
+
+	public fn SetPointer(address: byte)
+	{
+		var index: int = address as int
+		state {
+			this.pointer = index
+			this.pointerValid = true
+		}
+		this.LoadTransmitWindow(index)
+	}
+
+	public fn GetPointer() byte
+	{
+		return this.pointer as byte
+	}
+
+	public fn HasPointer() bool
+	{
+		return this.pointerValid
+	}
+
+	public fn HasWrittenRegister() bool
+	{
+		return this.hasWrittenRegister
+	}
+
+	public fn GetWrittenRegister() byte
+	{
+		return this.writtenRegister
+	}
+
+	public fn GetWrittenValue() byte
+	{
+		return this.writtenValue
+	}
+
+	public fn ClearWrittenRegister()
+	{
+		state {
+			this.hasWrittenRegister = false
+		}
+	}
+
+	public fn ClearPointer()
+	{
+		state {
+			this.pointer = 0
+			this.pointerValid = false
+			this.expectingPointer = false
+		}
+	}
+
+	public fn GetCurrentRegister() byte
+	{
+		return this.registers[this.pointer]
+	}
+
+	public fn AcceptWriteByte(value: byte)
+	{
+		if (this.pointerValid == false || this.expectingPointer == true) {
+			var index: int = value as int
+			state {
+				this.pointer = index
+				this.pointerValid = true
+				this.expectingPointer = false
+			}
+			this.LoadTransmitWindow(index)
+		} else {
+			state {
+				this.registers[this.pointer] = value
+				this.writtenRegister = this.pointer as byte
+				this.writtenValue = value
+				this.hasWrittenRegister = true
+			}
+			this.AdvancePointer()
+		}
+	}
+
+	public fn PrepareReadByte()
+	{
+		this.LoadTransmitWindow(this.pointer)
+	}
+
+	public fn HandleTransmittedByte(acked: bool)
+	{
+		if (acked) {
+			var nextPointer: int = this.NextIndex(this.pointer)
+			var followingPointer: int = this.NextIndex(nextPointer)
+			var followingValue: byte = this.registers[followingPointer]
+			state {
+				this.pointer = nextPointer
+			}
+			this.slave.SetNextTransmitByte(followingValue)
+		}
+	}
+
+	fn LoadTransmitWindow(index: int)
+	{
+		var nextIndex: int = this.NextIndex(index)
+		var transmitValue: byte = this.registers[index]
+		var nextValue: byte = this.registers[nextIndex]
+		this.slave.SetTransmitByte(transmitValue)
+		this.slave.SetNextTransmitByte(nextValue)
+	}
+
+	fn NextIndex(index: int) int
+	{
+		if (index >= REGISTER_COUNT - 1) {
+			return 0
+		}
+
+		return index + 1
+	}
+
+	fn AdvancePointer()
+	{
+		var nextPointer: int = this.NextIndex(this.pointer)
+		state {
+			this.pointer = nextPointer
+		}
+	}
+
+	process ServiceSlave()
+	{
+		if (this.slave.HasAddressMatch()) {
+			if (this.slave.WasWriteAddressed()) {
+				state {
+					this.expectingPointer = true
+				}
+				this.slave.ClearAddressMatch()
+			}
+			elif (this.slave.WasReadAddressed()) {
+				this.PrepareReadByte()
+				this.slave.ClearReadRequested()
+				this.slave.ClearAddressMatch()
+			}
+		}
+
+		if (this.slave.HasStopDetected()) {
+			this.slave.ClearStopDetected()
+			this.slave.ClearAddressMatch()
+		}
+
+		if (this.slave.HasReceivedByte()) {
+			var value: byte = this.slave.GetReceivedByte()
+			this.slave.ClearReceivedByte()
+			this.AcceptWriteByte(value)
+		}
+
+		if (this.slave.HasTransmittedByte()) {
+			var acked: bool = this.slave.WasTransmitAcked()
+			this.HandleTransmittedByte(acked)
+			this.slave.ClearTransmittedByte()
+			if (acked == false) {
+				this.slave.ClearAddressMatch()
+			}
+		}
+	}
+}

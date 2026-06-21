@@ -1,0 +1,47 @@
+namespace Livt.IO
+
+/**
+ * Combines two I2C device attachments into one upstream open-drain bus.
+ */
+component I2CBusCombiner
+{
+	upstream: I2CBus
+	public controller: I2CBus
+	public target: I2CBus
+	public scl_drive_low: logic
+	public sda_drive_low: logic
+
+	new(upstream: flip I2CBus)
+	{
+		this.upstream = upstream
+	}
+
+	process Combine[]()
+	{
+		var observedScl: logic = this.upstream.scl
+		var observedSda: logic = this.upstream.sda
+
+		if (this.controller.scl_drive_low == 0b1 || this.target.scl_drive_low == 0b1) {
+			this.upstream.scl_drive_low = 0b1
+			this.scl_drive_low = 0b1
+			observedScl = 0b0
+		} else {
+			this.upstream.scl_drive_low = 0b0
+			this.scl_drive_low = 0b0
+		}
+
+		if (this.controller.sda_drive_low == 0b1 || this.target.sda_drive_low == 0b1) {
+			this.upstream.sda_drive_low = 0b1
+			this.sda_drive_low = 0b1
+			observedSda = 0b0
+		} else {
+			this.upstream.sda_drive_low = 0b0
+			this.sda_drive_low = 0b0
+		}
+
+		this.controller.scl = observedScl
+		this.controller.sda = observedSda
+		this.target.scl = observedScl
+		this.target.sda = observedSda
+	}
+}

@@ -1,0 +1,562 @@
+namespace Livt.IO
+
+/**
+ * Byte-event I2C target peripheral for one 7-bit address.
+ *
+ * `SetTransmitByte` provides the current read byte. `SetNextTransmitByte`
+ * queues the next byte to become current immediately after a master ACK, which
+ * lets wrappers implement multi-byte reads without racing the next SCL edge.
+ */
+component I2CSlave
+{
+	bus: I2CBus
+	address: byte
+	prevScl: logic
+	prevSda: logic
+	bitCount: int
+	shiftReg: byte
+	receivedByte: byte
+	byteReceived: bool
+	transmitByte: byte
+	nextTransmitByte: byte
+	hasNextTransmitByte: bool
+	readRequested: bool
+	addressMatched: bool
+	isRead: bool
+	addressMatchEvent: bool
+	readAddressed: bool
+	writeAddressed: bool
+	stopDetected: bool
+	transmittedByte: bool
+	transmitAcked: bool
+	ackHighSeen: bool
+	ackLowSeen: bool
+	readSdaDriveLow: logic
+	initialized: bool
+	busActive: bool
+
+	new(bus: flip I2CBus, address: byte)
+	{
+		this.bus = bus
+		this.address = (address as int & 0x7F) as byte
+		this.bus.scl_drive_low = 0b0
+		this.bus.sda_drive_low = 0b0
+		this.prevScl = 0b1
+		this.prevSda = 0b1
+		this.bitCount = 0
+		this.shiftReg = 0x00
+		this.receivedByte = 0x00
+		this.byteReceived = false
+		this.transmitByte = 0x00
+		this.nextTransmitByte = 0x00
+		this.hasNextTransmitByte = false
+		this.readRequested = false
+		this.addressMatched = false
+		this.isRead = false
+		this.addressMatchEvent = false
+		this.readAddressed = false
+		this.writeAddressed = false
+		this.stopDetected = false
+		this.transmittedByte = false
+		this.transmitAcked = false
+		this.ackHighSeen = false
+		this.ackLowSeen = false
+		this.readSdaDriveLow = 0b0
+		this.initialized = false
+		this.busActive = false
+	}
+
+	public fn HasReceivedByte() bool
+	{
+		return this.byteReceived
+	}
+
+	public fn GetReceivedByte() byte
+	{
+		return this.receivedByte
+	}
+
+	public fn ClearReceivedByte()
+	{
+		this.byteReceived = false
+	}
+
+	public fn SetTransmitByte(value: byte)
+	{
+		this.transmitByte = value
+	}
+
+	public fn SetNextTransmitByte(value: byte)
+	{
+		state {
+			this.nextTransmitByte = value
+			this.hasNextTransmitByte = true
+		}
+	}
+
+	public fn ClearNextTransmitByte()
+	{
+		this.hasNextTransmitByte = false
+	}
+
+	public fn IsReadRequested() bool
+	{
+		return this.readRequested
+	}
+
+	public fn ClearReadRequested()
+	{
+		this.readRequested = false
+	}
+
+	public fn HasAddressMatch() bool
+	{
+		return this.addressMatchEvent
+	}
+
+	public fn ClearAddressMatch()
+	{
+		state {
+			this.addressMatchEvent = false
+			this.readAddressed = false
+			this.writeAddressed = false
+		}
+	}
+
+	public fn WasReadAddressed() bool
+	{
+		return this.readAddressed
+	}
+
+	public fn WasWriteAddressed() bool
+	{
+		return this.writeAddressed
+	}
+
+	public fn HasStopDetected() bool
+	{
+		return this.stopDetected
+	}
+
+	public fn ClearStopDetected()
+	{
+		this.stopDetected = false
+	}
+
+	public fn HasTransmittedByte() bool
+	{
+		return this.transmittedByte
+	}
+
+	public fn WasTransmitAcked() bool
+	{
+		return this.transmitAcked
+	}
+
+	public fn ClearTransmittedByte()
+	{
+		state {
+			this.transmittedByte = false
+			this.transmitAcked = false
+		}
+	}
+
+	process Main()
+	{
+		var oldScl: logic = 0b1
+		var oldSda: logic = 0b1
+		var sclNow: logic = 0b1
+		var sdaNow: logic = 0b1
+		var nextShift: int = 0
+		var matchedAddress: byte = 0x00
+		var rwBit: int = 0
+		var byteValue: int = 0
+		var shiftAmount: int = 0
+		var bitValue: int = 0
+		var readMode: bool = false
+
+		state Idle {
+			this.bus.scl_drive_low = 0b0
+			this.bus.sda_drive_low = 0b0
+
+			if (this.initialized == false) {
+				this.initialized = true
+				this.prevScl = this.bus.scl
+				this.prevSda = this.bus.sda
+				goto Idle
+			}
+
+			oldScl = this.prevScl
+			oldSda = this.prevSda
+			sclNow = this.bus.scl
+			sdaNow = this.bus.sda
+			this.prevScl = sclNow
+			this.prevSda = sdaNow
+
+			if (oldSda == 0b1 && sdaNow == 0b0 && sclNow == 0b1) {
+				this.busActive = true
+				this.bitCount = 0
+				this.shiftReg = 0x00
+				this.addressMatched = false
+				this.isRead = false
+				readMode = false
+				this.ackHighSeen = false
+				this.ackLowSeen = false
+				this.readSdaDriveLow = 0b0
+				goto AddressBits
+			} else {
+				goto Idle
+			}
+		}
+
+		state AddressBits {
+			this.bus.scl_drive_low = 0b0
+			this.bus.sda_drive_low = 0b0
+
+			oldScl = this.prevScl
+			oldSda = this.prevSda
+			sclNow = this.bus.scl
+			sdaNow = this.bus.sda
+			this.prevScl = sclNow
+			this.prevSda = sdaNow
+
+			if (oldSda == 0b1 && sdaNow == 0b0 && sclNow == 0b1) {
+				this.busActive = true
+				this.bitCount = 0
+				this.shiftReg = 0x00
+				this.addressMatched = false
+				this.isRead = false
+				readMode = false
+				this.ackHighSeen = false
+				this.ackLowSeen = false
+				this.readSdaDriveLow = 0b0
+				goto AddressBits
+			}
+			elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
+				this.stopDetected = true
+				this.busActive = false
+				this.bitCount = 0
+				this.shiftReg = 0x00
+				this.addressMatched = false
+				this.ackHighSeen = false
+				this.ackLowSeen = false
+				this.readSdaDriveLow = 0b0
+				goto Idle
+			}
+			elif (oldScl == 0b0 && sclNow == 0b1) {
+				nextShift = (this.shiftReg as int) << 1
+				if (sdaNow == 0b1) {
+					nextShift = nextShift | 1
+				}
+				this.shiftReg = nextShift as byte
+
+				if (this.bitCount == 7) {
+					matchedAddress = (nextShift >> 1) as byte
+					rwBit = nextShift & 1
+					this.bitCount = 0
+					if (matchedAddress == this.address) {
+						this.addressMatched = true
+						this.addressMatchEvent = true
+						readMode = (rwBit == 1)
+						this.isRead = readMode
+						if (readMode == true) {
+							this.readAddressed = true
+							this.readRequested = true
+						} else {
+							this.writeAddressed = true
+						}
+						this.ackHighSeen = false
+						this.ackLowSeen = false
+						goto AddressAck
+					} else {
+						this.addressMatched = false
+						goto Idle
+					}
+				} else {
+					this.bitCount = this.bitCount + 1
+					goto AddressBits
+				}
+			} else {
+				goto AddressBits
+			}
+		}
+
+		state AddressAck {
+			this.bus.scl_drive_low = 0b0
+			if (this.ackLowSeen == true) {
+				this.bus.sda_drive_low = 0b1
+			} else {
+				this.bus.sda_drive_low = 0b0
+			}
+
+			oldScl = this.prevScl
+			oldSda = this.prevSda
+			sclNow = this.bus.scl
+			sdaNow = this.bus.sda
+			this.prevScl = sclNow
+			this.prevSda = sdaNow
+
+			if (oldScl == 0b1 && sclNow == 0b0) {
+				if (this.ackHighSeen == true) {
+					this.bus.sda_drive_low = 0b0
+					this.shiftReg = 0x00
+					this.bitCount = 0
+					this.ackHighSeen = false
+					this.ackLowSeen = false
+					if (readMode == true) {
+						byteValue = this.transmitByte as int
+						shiftAmount = 7 - this.bitCount
+						bitValue = (byteValue >> shiftAmount) & 1
+						if (bitValue == 0) {
+							this.readSdaDriveLow = 0b1
+							this.bus.sda_drive_low = 0b1
+						} else {
+							this.readSdaDriveLow = 0b0
+							this.bus.sda_drive_low = 0b0
+						}
+						goto ReadDataBits
+					} else {
+						goto WriteDataBits
+					}
+				} else {
+					this.ackLowSeen = true
+					this.bus.sda_drive_low = 0b1
+					goto AddressAck
+				}
+			}
+			elif (oldScl == 0b0 && sclNow == 0b1) {
+				if (this.ackLowSeen == true) {
+					this.ackHighSeen = true
+				}
+				goto AddressAck
+			} else {
+				goto AddressAck
+			}
+		}
+
+		state WriteDataBits {
+			this.bus.scl_drive_low = 0b0
+			this.bus.sda_drive_low = 0b0
+
+			oldScl = this.prevScl
+			oldSda = this.prevSda
+			sclNow = this.bus.scl
+			sdaNow = this.bus.sda
+			this.prevScl = sclNow
+			this.prevSda = sdaNow
+
+			if (oldSda == 0b1 && sdaNow == 0b0 && sclNow == 0b1) {
+				this.busActive = true
+				this.bitCount = 0
+				this.shiftReg = 0x00
+				this.addressMatched = false
+				this.isRead = false
+				readMode = false
+				this.ackHighSeen = false
+				this.ackLowSeen = false
+				this.readSdaDriveLow = 0b0
+				goto AddressBits
+			}
+			elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
+				this.stopDetected = true
+				this.busActive = false
+				this.bitCount = 0
+				this.shiftReg = 0x00
+				this.addressMatched = false
+				this.ackHighSeen = false
+				this.ackLowSeen = false
+				this.readSdaDriveLow = 0b0
+				readMode = false
+				goto Idle
+			}
+			elif (oldScl == 0b0 && sclNow == 0b1) {
+				nextShift = (this.shiftReg as int) << 1
+				if (sdaNow == 0b1) {
+					nextShift = nextShift | 1
+				}
+				this.shiftReg = nextShift as byte
+
+				if (this.bitCount == 7) {
+					this.receivedByte = nextShift as byte
+					this.byteReceived = true
+					this.bitCount = 0
+					this.ackHighSeen = false
+					this.ackLowSeen = false
+					goto WriteAck
+				} else {
+					this.bitCount = this.bitCount + 1
+					goto WriteDataBits
+				}
+			} else {
+				goto WriteDataBits
+			}
+		}
+
+		state WriteAck {
+			this.bus.scl_drive_low = 0b0
+			if (this.ackLowSeen == true) {
+				this.bus.sda_drive_low = 0b1
+			} else {
+				this.bus.sda_drive_low = 0b0
+			}
+
+			oldScl = this.prevScl
+			oldSda = this.prevSda
+			sclNow = this.bus.scl
+			sdaNow = this.bus.sda
+			this.prevScl = sclNow
+			this.prevSda = sdaNow
+
+			if (oldScl == 0b1 && sclNow == 0b0) {
+				if (this.ackHighSeen == true) {
+					this.bus.sda_drive_low = 0b0
+					this.shiftReg = 0x00
+					this.ackHighSeen = false
+					this.ackLowSeen = false
+					goto WriteDataBits
+				} else {
+					this.ackLowSeen = true
+					this.bus.sda_drive_low = 0b1
+					goto WriteAck
+				}
+			}
+			elif (oldScl == 0b0 && sclNow == 0b1) {
+				if (this.ackLowSeen == true) {
+					this.ackHighSeen = true
+				}
+				goto WriteAck
+			} else {
+				goto WriteAck
+			}
+		}
+
+		state ReadDataBits {
+			this.bus.scl_drive_low = 0b0
+			this.bus.sda_drive_low = this.readSdaDriveLow
+
+			oldScl = this.prevScl
+			oldSda = this.prevSda
+			sclNow = this.bus.scl
+			sdaNow = this.bus.sda
+			this.prevScl = sclNow
+			this.prevSda = sdaNow
+
+			if (oldSda == 0b1 && sdaNow == 0b0 && sclNow == 0b1) {
+				this.busActive = true
+				this.bitCount = 0
+				this.shiftReg = 0x00
+				this.addressMatched = false
+				this.isRead = false
+				readMode = false
+				this.ackHighSeen = false
+				this.ackLowSeen = false
+				this.readSdaDriveLow = 0b0
+				this.bus.sda_drive_low = 0b0
+				goto AddressBits
+			}
+			elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
+				this.stopDetected = true
+				this.busActive = false
+				this.bitCount = 0
+				this.shiftReg = 0x00
+				this.addressMatched = false
+				this.ackHighSeen = false
+				this.ackLowSeen = false
+				this.readSdaDriveLow = 0b0
+				this.bus.sda_drive_low = 0b0
+				readMode = false
+				goto Idle
+			}
+			elif (oldScl == 0b1 && sclNow == 0b0) {
+				byteValue = this.transmitByte as int
+				shiftAmount = 7 - this.bitCount
+				bitValue = (byteValue >> shiftAmount) & 1
+				if (bitValue == 0) {
+					this.readSdaDriveLow = 0b1
+					this.bus.sda_drive_low = 0b1
+				} else {
+					this.readSdaDriveLow = 0b0
+					this.bus.sda_drive_low = 0b0
+				}
+				goto ReadDataBits
+			}
+			elif (oldScl == 0b0 && sclNow == 0b1) {
+				if (this.bitCount == 7) {
+					this.bitCount = 0
+					goto ReadRelease
+				} else {
+					this.bitCount = this.bitCount + 1
+					goto ReadDataBits
+				}
+			} else {
+				goto ReadDataBits
+			}
+		}
+
+		state ReadRelease {
+			this.bus.scl_drive_low = 0b0
+			this.bus.sda_drive_low = this.readSdaDriveLow
+
+			oldScl = this.prevScl
+			oldSda = this.prevSda
+			sclNow = this.bus.scl
+			sdaNow = this.bus.sda
+			this.prevScl = sclNow
+			this.prevSda = sdaNow
+
+			if (oldScl == 0b1 && sclNow == 0b0) {
+				this.readSdaDriveLow = 0b0
+				this.bus.sda_drive_low = 0b0
+				goto ReadAck
+			} else {
+				goto ReadRelease
+			}
+		}
+
+		state ReadAck {
+			this.bus.scl_drive_low = 0b0
+			this.bus.sda_drive_low = 0b0
+
+			oldScl = this.prevScl
+			oldSda = this.prevSda
+			sclNow = this.bus.scl
+			sdaNow = this.bus.sda
+			this.prevScl = sclNow
+			this.prevSda = sdaNow
+
+			if (oldSda == 0b1 && sdaNow == 0b0 && sclNow == 0b1) {
+				this.busActive = true
+				this.bitCount = 0
+				this.shiftReg = 0x00
+				this.addressMatched = false
+				this.isRead = false
+				readMode = false
+				this.ackHighSeen = false
+				this.ackLowSeen = false
+				this.readSdaDriveLow = 0b0
+				goto AddressBits
+			}
+			elif (oldScl == 0b0 && sclNow == 0b1) {
+				this.transmittedByte = true
+				this.transmitAcked = (sdaNow == 0b0)
+				if (sdaNow == 0b0) {
+					if (this.hasNextTransmitByte == true) {
+						this.transmitByte = this.nextTransmitByte
+						this.hasNextTransmitByte = false
+					}
+					this.bitCount = 0
+					this.readSdaDriveLow = 0b0
+					goto ReadDataBits
+				} else {
+					this.busActive = false
+					this.addressMatched = false
+					readMode = false
+					goto Idle
+				}
+			}
+			else {
+				goto ReadAck
+			}
+		}
+	}
+}

@@ -1,0 +1,135 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+component I2CRegisterSlaveSmokeBus : I2CBus
+{
+	new()
+	{
+		this.scl = 0b1
+		this.sda = 0b1
+	}
+}
+
+@Test
+component I2CRegisterSlaveTest
+{
+	bus: I2CRegisterSlaveSmokeBus
+	registers: I2CRegisterSlave
+
+	new()
+	{
+		this.bus = new I2CRegisterSlaveSmokeBus()
+		this.registers = new I2CRegisterSlave(this.bus, 0x42)
+	}
+
+	@Test
+	fn TestInitialPointerState()
+	{
+		assert this.registers.HasPointer() == false
+		assert this.registers.GetPointer() == 0x00
+		assert this.registers.HasWrittenRegister() == false
+	}
+
+	@Test
+	fn TestSetAndGetRegister()
+	{
+		this.registers.SetRegister(0x10, 0xAB)
+		this.registers.SetRegister(0x80, 0xCD)
+
+		assert this.registers.GetRegister(0x10) == 0xAB
+		assert this.registers.GetRegister(0x80) == 0xCD
+	}
+
+	@Test
+	fn TestPointerCanBeSetAndCleared()
+	{
+		this.registers.SetPointer(0x21)
+
+		assert this.registers.HasPointer() == true
+		assert this.registers.GetPointer() == 0x21
+
+		this.registers.ClearPointer()
+
+		assert this.registers.HasPointer() == false
+		assert this.registers.GetPointer() == 0x00
+	}
+
+	@Test
+	fn TestClearWrittenRegisterFlag()
+	{
+		this.registers.ClearWrittenRegister()
+
+		assert this.registers.HasWrittenRegister() == false
+		assert this.registers.GetWrittenRegister() == 0x00
+		assert this.registers.GetWrittenValue() == 0x00
+	}
+
+	@Test
+	fn TestAcceptWriteByteSelectsPointerThenWritesAndIncrements()
+	{
+		this.registers.AcceptWriteByte(0x10)
+
+		assert this.registers.HasPointer() == true
+		assert this.registers.GetPointer() == 0x10
+		assert this.registers.HasWrittenRegister() == false
+
+		this.registers.AcceptWriteByte(0xAB)
+
+		assert this.registers.GetRegister(0x10) == 0xAB
+		assert this.registers.GetPointer() == 0x11
+		assert this.registers.HasWrittenRegister() == true
+		assert this.registers.GetWrittenRegister() == 0x10
+		assert this.registers.GetWrittenValue() == 0xAB
+
+		this.registers.AcceptWriteByte(0xCD)
+
+		assert this.registers.GetRegister(0x11) == 0xCD
+		assert this.registers.GetPointer() == 0x12
+		assert this.registers.GetWrittenRegister() == 0x11
+		assert this.registers.GetWrittenValue() == 0xCD
+	}
+
+	@Test
+	fn TestAcceptWriteByteWrapsPointer()
+	{
+		this.registers.SetPointer(0xFF)
+		this.registers.AcceptWriteByte(0x5A)
+
+		assert this.registers.GetRegister(0xFF) == 0x5A
+		assert this.registers.GetPointer() == 0x00
+		assert this.registers.GetWrittenRegister() == 0xFF
+		assert this.registers.GetWrittenValue() == 0x5A
+	}
+
+	@Test
+	fn TestCurrentRegisterFollowsPointer()
+	{
+		this.registers.SetRegister(0x22, 0x66)
+		this.registers.SetPointer(0x22)
+
+		assert this.registers.GetCurrentRegister() == 0x66
+
+		this.registers.PrepareReadByte()
+
+		assert this.registers.GetCurrentRegister() == 0x66
+	}
+
+	@Test
+	fn TestHandleTransmittedByteAdvancesOnlyOnAck()
+	{
+		this.registers.SetRegister(0x40, 0x11)
+		this.registers.SetRegister(0x41, 0x22)
+		this.registers.SetPointer(0x40)
+
+		this.registers.HandleTransmittedByte(true)
+
+		assert this.registers.GetPointer() == 0x41
+		assert this.registers.GetCurrentRegister() == 0x22
+
+		this.registers.HandleTransmittedByte(false)
+
+		assert this.registers.GetPointer() == 0x41
+		assert this.registers.GetCurrentRegister() == 0x22
+	}
+}

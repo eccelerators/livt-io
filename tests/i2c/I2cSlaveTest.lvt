@@ -1,0 +1,270 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+component I2CSlaveTestBus : I2CBus
+{
+	observed_scl: logic
+	observed_sda: logic
+
+	new()
+	{
+		this.observed_scl = 0b1
+		this.observed_sda = 0b1
+	}
+
+	process ApplyObservedLines()
+	{
+		state {
+			this.scl = this.observed_scl
+			this.sda = this.observed_sda
+		}
+	}
+
+	public fn SetObservedLines(sclValue: logic, sdaValue: logic)
+	{
+		state {
+			this.observed_scl = sclValue
+			this.observed_sda = sdaValue
+		}
+	}
+
+	public fn ReadSdaDriveLow() logic
+	{
+		return this.sda_drive_low
+	}
+}
+
+@Test
+component I2CSlaveTest
+{
+	bus: I2CSlaveTestBus
+	slave: I2CSlave
+
+	new()
+	{
+		this.bus = new I2CSlaveTestBus()
+		this.slave = new I2CSlave(this.bus, 0x42)
+	}
+
+	fn DriveLines(sclValue: logic, sdaValue: logic)
+	{
+		this.bus.SetObservedLines(sclValue, sdaValue)
+		Simulation.Wait(40)
+	}
+
+	fn SendStart()
+	{
+		this.DriveLines(0b1, 0b1)
+		this.DriveLines(0b1, 0b0)
+		this.DriveLines(0b0, 0b0)
+	}
+
+	fn SendStop()
+	{
+		this.DriveLines(0b0, 0b0)
+		this.DriveLines(0b1, 0b0)
+		this.DriveLines(0b1, 0b1)
+	}
+
+	fn ClockBit(value: logic)
+	{
+		this.DriveLines(0b0, value)
+		this.DriveLines(0b1, value)
+		this.DriveLines(0b0, value)
+	}
+
+	fn SendByte(value: byte)
+	{
+		var byteValue: int = value as int
+		for (var i = 0; i < 8; i++) {
+			var shiftAmount: int = 7 - i
+			var bitValue: int = (byteValue >> shiftAmount) & 1
+			if (bitValue == 0) {
+				this.ClockBit(0b0)
+			} else {
+				this.ClockBit(0b1)
+			}
+		}
+	}
+
+	fn ClockSlaveAck()
+	{
+		this.DriveLines(0b0, 0b1)
+		this.DriveLines(0b1, 0b1)
+		this.DriveLines(0b0, 0b1)
+	}
+
+	fn ClockMasterAck(ack: bool)
+	{
+		if (ack) {
+			this.DriveLines(0b0, 0b0)
+			this.DriveLines(0b1, 0b0)
+			this.DriveLines(0b0, 0b0)
+		} else {
+			this.DriveLines(0b0, 0b1)
+			this.DriveLines(0b1, 0b1)
+			this.DriveLines(0b0, 0b1)
+		}
+	}
+
+	fn ClockReadByte()
+	{
+		for (var i = 0; i < 8; i++) {
+			this.ClockBit(0b1)
+		}
+	}
+
+	fn ClearEvents()
+	{
+		this.slave.ClearAddressMatch()
+		this.slave.ClearReceivedByte()
+		this.slave.ClearReadRequested()
+		this.slave.ClearStopDetected()
+		this.slave.ClearTransmittedByte()
+	}
+
+	@Test
+	fn TestInitialEventState()
+	{
+		this.ClearEvents()
+
+		assert this.slave.HasReceivedByte() == false
+		assert this.slave.GetReceivedByte() == 0x00
+		assert this.slave.IsReadRequested() == false
+		assert this.slave.HasAddressMatch() == false
+		assert this.slave.HasStopDetected() == false
+		assert this.slave.HasTransmittedByte() == false
+	}
+
+	@Test
+	fn TestAddressMatchWriteDirection()
+	{
+		this.ClearEvents()
+		this.SendStart()
+		this.SendByte(0x84)
+		Simulation.Wait(80)
+
+		assert this.slave.HasAddressMatch() == true
+		assert this.slave.WasWriteAddressed() == true
+		assert this.slave.WasReadAddressed() == false
+		assert this.bus.ReadSdaDriveLow() == 0b1
+
+		this.slave.ClearAddressMatch()
+		assert this.slave.HasAddressMatch() == false
+
+		this.ClockSlaveAck()
+		this.SendStop()
+	}
+
+	@Test
+	fn TestAddressMatchReadDirection()
+	{
+		this.ClearEvents()
+		this.SendStart()
+		this.SendByte(0x85)
+		Simulation.Wait(80)
+
+		assert this.slave.HasAddressMatch() == true
+		assert this.slave.WasReadAddressed() == true
+		assert this.slave.WasWriteAddressed() == false
+		assert this.slave.IsReadRequested() == true
+
+		this.ClockSlaveAck()
+		this.ClockReadByte()
+		this.ClockMasterAck(false)
+	}
+
+	@Test
+	fn TestAddressMissDoesNotAck()
+	{
+		this.ClearEvents()
+		this.SendStart()
+		this.SendByte(0x86)
+		Simulation.Wait(80)
+
+		assert this.slave.HasAddressMatch() == false
+		assert this.bus.ReadSdaDriveLow() == 0b0
+
+		this.SendStop()
+	}
+
+	@Test
+	fn TestWriteReceiveByte()
+	{
+		this.ClearEvents()
+		this.SendStart()
+		this.SendByte(0x84)
+		this.ClockSlaveAck()
+		this.SendByte(0xA5)
+		Simulation.Wait(80)
+
+		assert this.slave.HasReceivedByte() == true
+		assert this.slave.GetReceivedByte() == 0xA5
+
+		this.slave.ClearReceivedByte()
+		assert this.slave.HasReceivedByte() == false
+
+		this.ClockSlaveAck()
+		this.SendStop()
+	}
+
+	@Test
+	fn TestReadTransmitAckAndNackEvents()
+	{
+		this.ClearEvents()
+		this.slave.SetTransmitByte(0x5A)
+		this.SendStart()
+		this.SendByte(0x85)
+		this.ClockSlaveAck()
+		this.slave.ClearReadRequested()
+		this.ClockReadByte()
+		this.ClockMasterAck(true)
+		Simulation.Wait(80)
+
+		assert this.slave.HasTransmittedByte() == true
+		assert this.slave.WasTransmitAcked() == true
+
+		this.slave.ClearTransmittedByte()
+		assert this.slave.HasTransmittedByte() == false
+
+		this.ClockReadByte()
+		this.ClockMasterAck(false)
+		Simulation.Wait(80)
+
+		assert this.slave.HasTransmittedByte() == true
+		assert this.slave.WasTransmitAcked() == false
+	}
+
+	@Test
+	fn TestStopDetected()
+	{
+		this.ClearEvents()
+		this.SendStart()
+		this.SendByte(0x84)
+		this.ClockSlaveAck()
+		this.SendStop()
+		Simulation.Wait(80)
+
+		assert this.slave.HasStopDetected() == true
+
+		this.slave.ClearStopDetected()
+		assert this.slave.HasStopDetected() == false
+	}
+
+	@Test
+	fn TestRepeatedStartReturnsToAddressBits()
+	{
+		this.ClearEvents()
+		this.SendStart()
+		this.SendByte(0x84)
+		this.ClockSlaveAck()
+		this.SendStart()
+		this.SendByte(0x85)
+		Simulation.Wait(80)
+
+		assert this.slave.HasAddressMatch() == true
+		assert this.slave.WasReadAddressed() == true
+		assert this.slave.IsReadRequested() == true
+	}
+}

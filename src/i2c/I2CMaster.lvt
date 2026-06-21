@@ -1,0 +1,570 @@
+namespace Livt.IO
+
+/**
+ * Byte-level, single-controller I2C master for standard-mode timing.
+ */
+component I2CMaster
+{
+	public const CLOCK_HZ: int = 100000000
+	public const I2C_HZ: int = 100000
+	public const TICKS_PER_HALF_PERIOD: int = 500
+	public const MAX_7_BIT_ADDRESS: byte = 0x7F
+
+	const COMMAND_NONE: int = 0
+	const COMMAND_START: int = 1
+	const COMMAND_STOP: int = 2
+	const COMMAND_WRITE: int = 3
+	const COMMAND_READ: int = 4
+
+	bus: I2CBus
+	busy: bool
+	hasResult: bool
+	resultAck: bool
+	resultByte: byte
+	currentByte: byte
+	sendAck: bool
+	bitIndex: int
+	tickCount: int
+	command: int
+	observedScl: logic
+	observedSda: logic
+
+	new(bus: flip I2CBus)
+	{
+		this.bus = bus
+		this.bus.scl_drive_low = 0b0
+		this.bus.sda_drive_low = 0b0
+		this.busy = false
+		this.hasResult = false
+		this.resultAck = false
+		this.resultByte = 0x00
+		this.currentByte = 0x00
+		this.sendAck = false
+		this.bitIndex = 0
+		this.tickCount = 0
+		this.command = COMMAND_NONE
+		this.observedScl = 0b1
+		this.observedSda = 0b1
+	}
+
+	public fn BeginStart() bool
+	{
+		if (this.busy == true) {
+			return false
+		}
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.command = COMMAND_START
+			this.tickCount = 0
+		}
+
+		return true
+	}
+
+	public fn BeginStop() bool
+	{
+		if (this.busy == true) {
+			return false
+		}
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.command = COMMAND_STOP
+			this.tickCount = 0
+		}
+
+		return true
+	}
+
+	public fn BeginWriteByte(data: byte) bool
+	{
+		if (this.busy == true) {
+			return false
+		}
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.resultAck = false
+			this.currentByte = data
+			this.bitIndex = 0
+			this.command = COMMAND_WRITE
+			this.tickCount = 0
+		}
+
+		return true
+	}
+
+	public fn BeginWriteAddress(address: byte) bool
+	{
+		if (this.busy == true) {
+			return false
+		}
+		if (address > MAX_7_BIT_ADDRESS) {
+			return false
+		}
+
+		var addressValue: int = address as int
+		var writeAddress: byte = (addressValue << 1) as byte
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.resultAck = false
+			this.currentByte = writeAddress
+			this.bitIndex = 0
+			this.command = COMMAND_WRITE
+			this.tickCount = 0
+		}
+
+		return true
+	}
+
+	public fn BeginReadAddress(address: byte) bool
+	{
+		if (this.busy == true) {
+			return false
+		}
+		if (address > MAX_7_BIT_ADDRESS) {
+			return false
+		}
+
+		var addressValue: int = address as int
+		var readAddress: byte = ((addressValue << 1) | 1) as byte
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.resultAck = false
+			this.currentByte = readAddress
+			this.bitIndex = 0
+			this.command = COMMAND_WRITE
+			this.tickCount = 0
+		}
+
+		return true
+	}
+
+	public fn BeginReadByte(sendAck: bool) bool
+	{
+		if (this.busy == true) {
+			return false
+		}
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.resultByte = 0x00
+			this.sendAck = sendAck
+			this.bitIndex = 0
+			this.command = COMMAND_READ
+			this.tickCount = 0
+		}
+
+		return true
+	}
+
+	public fn IsBusy() bool
+	{
+		return this.busy
+	}
+
+	public fn HasResult() bool
+	{
+		return this.hasResult
+	}
+
+	public fn WasAckReceived() bool
+	{
+		return this.resultAck
+	}
+
+	public fn WasNackReceived() bool
+	{
+		return this.resultAck == false
+	}
+
+	public fn GetReadByte() byte
+	{
+		return this.resultByte
+	}
+
+	public fn ClearResult()
+	{
+		state {
+			this.hasResult = false
+			this.resultAck = false
+		}
+	}
+
+	process SampleBus()
+	{
+		state {
+			this.observedScl = this.bus.scl
+			this.observedSda = this.bus.sda
+		}
+	}
+
+	process Main()
+	{
+		var phaseTick: int = 0
+		var phaseBit: int = 0
+		var heldSclDriveLow: logic = 0b0
+		var heldSdaDriveLow: logic = 0b0
+		var commandInFlight: bool = false
+
+		state Idle {
+			phaseTick = 0
+			phaseBit = 0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+
+			if (commandInFlight == true) {
+				if (this.busy == false) {
+					commandInFlight = false
+				}
+				goto Idle
+			}
+			elif (this.busy == false) {
+				goto Idle
+			}
+			elif (this.command == COMMAND_START) {
+				commandInFlight = true
+				goto StartRelease
+			}
+			elif (this.command == COMMAND_STOP) {
+				commandInFlight = true
+				goto StopSdaLow
+			}
+			elif (this.command == COMMAND_WRITE) {
+				commandInFlight = true
+				goto WriteBitLow
+			}
+			elif (this.command == COMMAND_READ) {
+				commandInFlight = true
+				goto ReadBitLow
+			} else {
+				goto Idle
+			}
+		}
+
+		state StartRelease {
+			heldSclDriveLow = 0b0
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (this.observedScl == 0b1) {
+				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+					phaseTick = 0
+					goto StartSetup
+				} else {
+					phaseTick = phaseTick + 1
+					goto StartRelease
+				}
+			} else {
+				phaseTick = 0
+				goto StartRelease
+			}
+		}
+
+		state StartSetup {
+			heldSclDriveLow = 0b0
+			heldSdaDriveLow = 0b1
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (this.observedScl == 0b1) {
+				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+					phaseTick = 0
+					goto StartSclLow
+				} else {
+					phaseTick = phaseTick + 1
+					goto StartSetup
+				}
+			} else {
+				phaseTick = 0
+				goto StartSetup
+			}
+		}
+
+		state StartSclLow {
+			heldSclDriveLow = 0b1
+			heldSdaDriveLow = 0b1
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				this.busy = false
+				this.hasResult = true
+				this.command = COMMAND_NONE
+				phaseTick = 0
+				goto Idle
+			} else {
+				phaseTick = phaseTick + 1
+				goto StartSclLow
+			}
+		}
+
+		state StopSdaLow {
+			heldSclDriveLow = 0b1
+			heldSdaDriveLow = 0b1
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				phaseTick = 0
+				goto StopSclHigh
+			} else {
+				phaseTick = phaseTick + 1
+				goto StopSdaLow
+			}
+		}
+
+		state StopSclHigh {
+			heldSclDriveLow = 0b0
+			heldSdaDriveLow = 0b1
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (this.observedScl == 0b1) {
+				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+					phaseTick = 0
+					goto StopRelease
+				} else {
+					phaseTick = phaseTick + 1
+					goto StopSclHigh
+				}
+			} else {
+				phaseTick = 0
+				goto StopSclHigh
+			}
+		}
+
+		state StopRelease {
+			heldSclDriveLow = 0b0
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				this.busy = false
+				this.hasResult = true
+				this.command = COMMAND_NONE
+				phaseTick = 0
+				goto Idle
+			} else {
+				phaseTick = phaseTick + 1
+				goto StopRelease
+			}
+		}
+
+		state WriteBitLow {
+			heldSclDriveLow = 0b1
+			var byteValue: int = this.currentByte as int
+			var shiftAmount: int = 7 - phaseBit
+			var bitValue: int = (byteValue >> shiftAmount) & 1
+			if (bitValue == 0) {
+				heldSdaDriveLow = 0b1
+			} else {
+				heldSdaDriveLow = 0b0
+			}
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				phaseTick = 0
+				goto WriteBitHigh
+			} else {
+				phaseTick = phaseTick + 1
+				goto WriteBitLow
+			}
+		}
+
+		state WriteBitHigh {
+			heldSclDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (this.observedScl == 0b1) {
+				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+					phaseTick = 0
+					if (phaseBit == 7) {
+						goto WriteAckLow
+					} else {
+						phaseBit = phaseBit + 1
+						goto WriteBitLow
+					}
+				} else {
+					phaseTick = phaseTick + 1
+					goto WriteBitHigh
+				}
+			} else {
+				phaseTick = 0
+				goto WriteBitHigh
+			}
+		}
+
+		state WriteAckLow {
+			heldSclDriveLow = 0b1
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				phaseTick = 0
+				goto WriteAckHigh
+			} else {
+				phaseTick = phaseTick + 1
+				goto WriteAckLow
+			}
+		}
+
+		state WriteAckHigh {
+			heldSclDriveLow = 0b0
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (this.observedScl == 0b1) {
+				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+					this.resultAck = (this.observedSda == 0b0)
+					phaseTick = 0
+					goto WriteAckFinishLow
+				} else {
+					phaseTick = phaseTick + 1
+					goto WriteAckHigh
+				}
+			} else {
+				phaseTick = 0
+				goto WriteAckHigh
+			}
+		}
+
+		state WriteAckFinishLow {
+			heldSclDriveLow = 0b1
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				this.busy = false
+				this.hasResult = true
+				this.command = COMMAND_NONE
+				phaseTick = 0
+				goto Idle
+			} else {
+				phaseTick = phaseTick + 1
+				goto WriteAckFinishLow
+			}
+		}
+
+		state ReadBitLow {
+			heldSclDriveLow = 0b1
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				phaseTick = 0
+				goto ReadBitHigh
+			} else {
+				phaseTick = phaseTick + 1
+				goto ReadBitLow
+			}
+		}
+
+		state ReadBitHigh {
+			heldSclDriveLow = 0b0
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (this.observedScl == 0b1) {
+				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+					phaseTick = 0
+					goto ReadBitSample
+				} else {
+					phaseTick = phaseTick + 1
+					goto ReadBitHigh
+				}
+			} else {
+				phaseTick = 0
+				goto ReadBitHigh
+			}
+		}
+
+		state ReadBitSample {
+			heldSclDriveLow = 0b0
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (this.observedScl == 0b1) {
+				var sampledBit: int = 0
+				if (this.observedSda == 0b1) {
+					sampledBit = 1
+				}
+
+				var currentValue: int = this.resultByte as int
+				var shiftAmount: int = 7 - phaseBit
+				this.resultByte = (currentValue | (sampledBit << shiftAmount)) as byte
+				if (phaseBit == 7) {
+					goto SendAckLow
+				} else {
+					phaseBit = phaseBit + 1
+					goto ReadBitLow
+				}
+			} else {
+				phaseTick = 0
+				goto ReadBitHigh
+			}
+		}
+
+		state SendAckLow {
+			heldSclDriveLow = 0b1
+			if (this.sendAck == true) {
+				heldSdaDriveLow = 0b1
+			} else {
+				heldSdaDriveLow = 0b0
+			}
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				phaseTick = 0
+				goto SendAckHigh
+			} else {
+				phaseTick = phaseTick + 1
+				goto SendAckLow
+			}
+		}
+
+		state SendAckHigh {
+			heldSclDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (this.observedScl == 0b1) {
+				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+					heldSdaDriveLow = 0b0
+					this.bus.sda_drive_low = heldSdaDriveLow
+					phaseTick = 0
+					goto SendAckFinishLow
+				} else {
+					phaseTick = phaseTick + 1
+					goto SendAckHigh
+				}
+			} else {
+				phaseTick = 0
+				goto SendAckHigh
+			}
+		}
+
+		state SendAckFinishLow {
+			heldSclDriveLow = 0b1
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = heldSclDriveLow
+			this.bus.sda_drive_low = heldSdaDriveLow
+			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
+				this.busy = false
+				this.hasResult = true
+				this.command = COMMAND_NONE
+				phaseTick = 0
+				goto Idle
+			} else {
+				phaseTick = phaseTick + 1
+				goto SendAckFinishLow
+			}
+		}
+	}
+}

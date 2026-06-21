@@ -1,6 +1,6 @@
 [project]
 name = "Livt.IO"
-version = "0.1.0"
+version = "0.2.0"
 path = "src"
 outdir = "out"
 
@@ -13,7 +13,15 @@ components = [
     "UartBaseTest",
     "BufferedUartTest",
     "UartTest",
-    "LoopbackUartTest"
+    "LoopbackUartTest",
+    "I2COpenDrainPinsTest",
+    "I2CBusCombinerTest",
+    "I2CMasterTest",
+    "I2CSlaveTest",
+    "I2CRegisterSlaveTest",
+    "I2CIntegrationTest",
+    "I2CReadIntegrationTest",
+    "I2CRegisterIntegrationTest"
 ]
 
 [build.debug]

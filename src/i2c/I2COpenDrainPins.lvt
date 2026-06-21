@@ -1,0 +1,43 @@
+namespace Livt.IO
+
+/**
+ * Adapts physical bidirectional pins to the logical open-drain I2C bus contract.
+ */
+component I2COpenDrainPins : I2CBus
+{
+	public physical_scl: inout logic
+	public physical_sda: inout logic
+
+	new(physicalScl: inout logic, physicalSda: inout logic)
+	{
+		this.physical_scl = physicalScl
+		this.physical_sda = physicalSda
+	}
+
+	process DrivePins[]()
+	{
+		if (this.scl_drive_low == 0b1) {
+			this.physical_scl = 0b0
+		} else {
+			this.physical_scl = 0bZ
+		}
+
+		if (this.sda_drive_low == 0b1) {
+			this.physical_sda = 0b0
+		} else {
+			this.physical_sda = 0bZ
+		}
+
+		if (this.physical_scl == 0b0) {
+			this.scl = 0b0
+		} else {
+			this.scl = 0b1
+		}
+
+		if (this.physical_sda == 0b0) {
+			this.sda = 0b0
+		} else {
+			this.sda = 0b1
+		}
+	}
+}

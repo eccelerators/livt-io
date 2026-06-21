@@ -1,0 +1,329 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+component ResolvedI2CTestBus : I2CBus
+{
+	new()
+	{
+		this.scl = 0b1
+		this.sda = 0b1
+	}
+
+	process ResolveLines()
+	{
+		state {
+			if (this.scl_drive_low == 0b1) {
+				this.scl = 0b0
+			} else {
+				this.scl = 0b1
+			}
+
+			if (this.sda_drive_low == 0b1) {
+				this.sda = 0b0
+			} else {
+				this.sda = 0b1
+			}
+		}
+	}
+}
+
+@Test
+component I2CIntegrationTest
+{
+	bus: ResolvedI2CTestBus
+	combiner: I2CBusCombiner
+	master: I2CMaster
+	slave: I2CSlave
+
+	new()
+	{
+		this.bus = new ResolvedI2CTestBus()
+		this.combiner = new I2CBusCombiner(this.bus)
+		this.master = new I2CMaster(this.combiner.controller)
+		this.slave = new I2CSlave(this.combiner.target, 0x42)
+	}
+
+	fn WaitForCommand()
+	{
+		Simulation.Wait(2000000)
+	}
+
+	fn RunStart()
+	{
+		var accepted: bool = this.master.BeginStart()
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		this.master.ClearResult()
+	}
+
+	fn RunStop()
+	{
+		var accepted: bool = this.master.BeginStop()
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		this.master.ClearResult()
+	}
+
+	fn RunWriteAddress(address: byte) bool
+	{
+		var accepted: bool = this.master.BeginWriteAddress(address)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var acked: bool = this.master.WasAckReceived()
+		this.master.ClearResult()
+		return acked
+	}
+
+	fn RunReadAddress(address: byte) bool
+	{
+		var accepted: bool = this.master.BeginReadAddress(address)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var acked: bool = this.master.WasAckReceived()
+		this.master.ClearResult()
+		return acked
+	}
+
+	fn RunWriteByte(value: byte) bool
+	{
+		var accepted: bool = this.master.BeginWriteByte(value)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var acked: bool = this.master.WasAckReceived()
+		this.master.ClearResult()
+		return acked
+	}
+
+	fn RunReadByte(sendAck: bool) byte
+	{
+		var accepted: bool = this.master.BeginReadByte(sendAck)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var value: byte = this.master.GetReadByte()
+		this.master.ClearResult()
+		return value
+	}
+
+	@Test
+	fn TestMasterWritesByteToSlave()
+	{
+		this.slave.ClearAddressMatch()
+		this.slave.ClearReceivedByte()
+
+		this.RunStart()
+		var addressAck: bool = this.RunWriteAddress(0x42)
+		assert this.slave.HasAddressMatch() == true
+		var dataAck: bool = this.RunWriteByte(0xA5)
+		this.RunStop()
+
+		assert addressAck == true
+		assert dataAck == true
+		assert this.slave.HasAddressMatch() == true
+		assert this.slave.WasWriteAddressed() == true
+		assert this.slave.HasReceivedByte() == true
+		assert this.slave.GetReceivedByte() == 0xA5
+	}
+
+}
+
+@Test
+component I2CReadIntegrationTest
+{
+	bus: ResolvedI2CTestBus
+	combiner: I2CBusCombiner
+	master: I2CMaster
+	slave: I2CSlave
+
+	new()
+	{
+		this.bus = new ResolvedI2CTestBus()
+		this.combiner = new I2CBusCombiner(this.bus)
+		this.master = new I2CMaster(this.combiner.controller)
+		this.slave = new I2CSlave(this.combiner.target, 0x42)
+	}
+
+	fn WaitForCommand()
+	{
+		Simulation.Wait(2000000)
+	}
+
+	fn RunStart()
+	{
+		var accepted: bool = this.master.BeginStart()
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		this.master.ClearResult()
+	}
+
+	fn RunStop()
+	{
+		var accepted: bool = this.master.BeginStop()
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		this.master.ClearResult()
+	}
+
+	fn RunReadAddress(address: byte) bool
+	{
+		var accepted: bool = this.master.BeginReadAddress(address)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var acked: bool = this.master.WasAckReceived()
+		this.master.ClearResult()
+		return acked
+	}
+
+	fn RunReadByte(sendAck: bool) byte
+	{
+		var accepted: bool = this.master.BeginReadByte(sendAck)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var value: byte = this.master.GetReadByte()
+		this.master.ClearResult()
+		return value
+	}
+
+	@Test
+	fn TestMasterReadsByteFromSlave()
+	{
+		this.slave.ClearAddressMatch()
+		this.slave.ClearReadRequested()
+		this.slave.ClearTransmittedByte()
+		this.slave.SetTransmitByte(0x5A)
+
+		this.RunStart()
+		var addressAck: bool = this.RunReadAddress(0x42)
+		var value: byte = this.RunReadByte(false)
+		this.RunStop()
+
+		assert addressAck == true
+		assert this.slave.HasAddressMatch() == true
+		assert this.slave.WasReadAddressed() == true
+		assert value == 0x5A
+		assert this.slave.HasTransmittedByte() == true
+		assert this.slave.WasTransmitAcked() == false
+	}
+}
+
+@Test
+component I2CRegisterIntegrationTest
+{
+	bus: ResolvedI2CTestBus
+	combiner: I2CBusCombiner
+	master: I2CMaster
+	registers: I2CRegisterSlave
+
+	new()
+	{
+		this.bus = new ResolvedI2CTestBus()
+		this.combiner = new I2CBusCombiner(this.bus)
+		this.master = new I2CMaster(this.combiner.controller)
+		this.registers = new I2CRegisterSlave(this.combiner.target, 0x42)
+	}
+
+	fn WaitForCommand()
+	{
+		Simulation.Wait(2000000)
+	}
+
+	fn RunStart()
+	{
+		var accepted: bool = this.master.BeginStart()
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		this.master.ClearResult()
+	}
+
+	fn RunStop()
+	{
+		var accepted: bool = this.master.BeginStop()
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		this.master.ClearResult()
+	}
+
+	fn RunWriteAddress(address: byte) bool
+	{
+		var accepted: bool = this.master.BeginWriteAddress(address)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var acked: bool = this.master.WasAckReceived()
+		this.master.ClearResult()
+		return acked
+	}
+
+	fn RunReadAddress(address: byte) bool
+	{
+		var accepted: bool = this.master.BeginReadAddress(address)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var acked: bool = this.master.WasAckReceived()
+		this.master.ClearResult()
+		return acked
+	}
+
+	fn RunWriteByte(value: byte) bool
+	{
+		var accepted: bool = this.master.BeginWriteByte(value)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var acked: bool = this.master.WasAckReceived()
+		this.master.ClearResult()
+		return acked
+	}
+
+	fn RunReadByte(sendAck: bool) byte
+	{
+		var accepted: bool = this.master.BeginReadByte(sendAck)
+		assert accepted == true
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		var value: byte = this.master.GetReadByte()
+		this.master.ClearResult()
+		return value
+	}
+
+	@Test
+	fn TestMasterWritesThenReadsRegister()
+	{
+		this.RunStart()
+		assert this.RunWriteAddress(0x42) == true
+		assert this.RunWriteByte(0x10) == true
+		assert this.RunWriteByte(0x5A) == true
+		assert this.RunWriteByte(0xC3) == true
+		this.RunStop()
+
+		assert this.registers.GetRegister(0x10) == 0x5A
+		assert this.registers.GetRegister(0x11) == 0xC3
+
+		this.RunStart()
+		assert this.RunWriteAddress(0x42) == true
+		assert this.RunWriteByte(0x10) == true
+		assert this.registers.GetPointer() == 0x10
+		this.RunStart()
+		assert this.RunReadAddress(0x42) == true
+		var first: byte = this.RunReadByte(true)
+		var second: byte = this.RunReadByte(false)
+		this.RunStop()
+
+		assert first == 0x5A
+		assert second == 0xC3
+		assert this.registers.GetPointer() == 0x11
+	}
+}

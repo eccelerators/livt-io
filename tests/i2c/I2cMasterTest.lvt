@@ -1,0 +1,172 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+component I2CMasterTestBus : I2CBus
+{
+	observed_scl: logic
+	observed_sda: logic
+
+	new()
+	{
+		this.observed_scl = 0b1
+		this.observed_sda = 0b1
+	}
+
+	process ApplyObservedLines()
+	{
+		state {
+			this.scl = this.observed_scl
+			this.sda = this.observed_sda
+		}
+	}
+
+	public fn SetObservedLines(sclValue: logic, sdaValue: logic)
+	{
+		state {
+			this.observed_scl = sclValue
+			this.observed_sda = sdaValue
+		}
+	}
+}
+
+@Test
+component I2CMasterTest
+{
+	bus: I2CMasterTestBus
+	master: I2CMaster
+
+	new()
+	{
+		this.bus = new I2CMasterTestBus()
+		this.master = new I2CMaster(this.bus)
+	}
+
+	fn WaitForCommand()
+	{
+		Simulation.Wait(2000000)
+	}
+
+	@Test
+	fn TestBusyRejectsSecondCommand()
+	{
+		this.bus.SetObservedLines(0b1, 0b1)
+
+		var started: bool = this.master.BeginStart()
+		var rejected: bool = this.master.BeginStop()
+
+		assert started == true
+		assert rejected == false
+		assert this.master.IsBusy() == true
+
+		this.WaitForCommand()
+
+		assert this.master.IsBusy() == false
+		assert this.master.HasResult() == true
+
+		this.master.ClearResult()
+		assert this.master.HasResult() == false
+	}
+
+	@Test
+	fn TestWriteWithoutTargetReportsNack()
+	{
+		this.bus.SetObservedLines(0b1, 0b1)
+
+		var accepted: bool = this.master.BeginWriteByte(0x55)
+		assert accepted == true
+
+		this.WaitForCommand()
+
+		assert this.master.HasResult() == true
+		assert this.master.WasAckReceived() == false
+		assert this.master.WasNackReceived() == true
+	}
+
+	@Test
+	fn TestWriteWithExternalAckReportsAck()
+	{
+		this.bus.SetObservedLines(0b1, 0b0)
+
+		var accepted: bool = this.master.BeginWriteByte(0x55)
+		assert accepted == true
+
+		this.WaitForCommand()
+
+		assert this.master.HasResult() == true
+		assert this.master.WasAckReceived() == true
+		assert this.master.WasNackReceived() == false
+	}
+
+	@Test
+	fn TestBeginWriteAddressSendsShiftedWriteAddress()
+	{
+		this.bus.SetObservedLines(0b1, 0b0)
+
+		var accepted: bool = this.master.BeginWriteAddress(0x42)
+		assert accepted == true
+
+		this.WaitForCommand()
+
+		assert this.master.HasResult() == true
+		assert this.master.WasAckReceived() == true
+	}
+
+	@Test
+	fn TestBeginReadAddressSendsShiftedReadAddress()
+	{
+		this.bus.SetObservedLines(0b1, 0b0)
+
+		var accepted: bool = this.master.BeginReadAddress(0x42)
+		assert accepted == true
+
+		this.WaitForCommand()
+
+		assert this.master.HasResult() == true
+		assert this.master.WasAckReceived() == true
+	}
+
+	@Test
+	fn TestAddressHelpersRejectInvalidSevenBitAddress()
+	{
+		this.bus.SetObservedLines(0b1, 0b1)
+		this.master.ClearResult()
+
+		assert this.master.BeginWriteAddress(0x80) == false
+		assert this.master.BeginReadAddress(0x80) == false
+		assert this.master.IsBusy() == false
+		assert this.master.HasResult() == false
+	}
+
+	@Test
+	fn TestReadReleasedLineReturnsAllOnes()
+	{
+		this.bus.SetObservedLines(0b1, 0b1)
+
+		var accepted: bool = this.master.BeginReadByte(false)
+		assert accepted == true
+
+		this.WaitForCommand()
+
+		assert this.master.HasResult() == true
+		assert this.master.GetReadByte() == 0xFF
+	}
+
+	@Test
+	fn TestClockStretchKeepsMasterBusyUntilSclReleased()
+	{
+		this.bus.SetObservedLines(0b0, 0b1)
+
+		var accepted: bool = this.master.BeginStop()
+		assert accepted == true
+
+		Simulation.Wait(1000000)
+		assert this.master.IsBusy() == true
+
+		this.bus.SetObservedLines(0b1, 0b1)
+		this.WaitForCommand()
+
+		assert this.master.IsBusy() == false
+		assert this.master.HasResult() == true
+	}
+}

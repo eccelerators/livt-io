@@ -1,0 +1,137 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+component TestI2CBusProvider : I2CBus
+{
+	observed_scl: logic
+	observed_sda: logic
+
+	new()
+	{
+		this.observed_scl = 0b1
+		this.observed_sda = 0b1
+	}
+
+	process ApplyObservedLines()
+	{
+		state {
+			this.scl = this.observed_scl
+			this.sda = this.observed_sda
+		}
+	}
+
+	public fn SetObservedLines(sclValue: logic, sdaValue: logic)
+	{
+		state {
+			this.observed_scl = sclValue
+			this.observed_sda = sdaValue
+		}
+	}
+
+	public fn ReadSclDriveLow() logic
+	{
+		return this.scl_drive_low
+	}
+
+	public fn ReadSdaDriveLow() logic
+	{
+		return this.sda_drive_low
+	}
+}
+
+component AttachmentProbe
+{
+	bus: I2CBus
+	scl_drive_low: logic
+	sda_drive_low: logic
+
+	new(bus: flip I2CBus)
+	{
+		this.bus = bus
+		this.scl_drive_low = 0b0
+		this.sda_drive_low = 0b0
+	}
+
+	process ApplyDrive()
+	{
+		state {
+			this.bus.scl_drive_low = this.scl_drive_low
+			this.bus.sda_drive_low = this.sda_drive_low
+		}
+	}
+
+	public fn SetDrive(sclLow: logic, sdaLow: logic)
+	{
+		state {
+			this.scl_drive_low = sclLow
+			this.sda_drive_low = sdaLow
+		}
+	}
+
+	public fn ReadScl() logic
+	{
+		return this.bus.scl
+	}
+
+	public fn ReadSda() logic
+	{
+		return this.bus.sda
+	}
+}
+
+@Test
+component I2CBusCombinerTest
+{
+	root: TestI2CBusProvider
+	controller: AttachmentProbe
+	target: AttachmentProbe
+	combiner: I2CBusCombiner
+
+	new()
+	{
+		this.root = new TestI2CBusProvider()
+		this.combiner = new I2CBusCombiner(this.root)
+		this.controller = new AttachmentProbe(this.combiner.controller)
+		this.target = new AttachmentProbe(this.combiner.target)
+	}
+
+	@Test
+	fn TestReleasedDevicesReleaseUpstream()
+	{
+		this.root.SetObservedLines(0b1, 0b1)
+		this.controller.SetDrive(0b0, 0b0)
+		this.target.SetDrive(0b0, 0b0)
+		Simulation.Wait(80)
+
+		assert this.root.ReadSclDriveLow() == 0b0
+		assert this.root.ReadSdaDriveLow() == 0b0
+	}
+
+	@Test
+	fn TestEitherDeviceCanDriveLow()
+	{
+		this.root.SetObservedLines(0b1, 0b1)
+		this.controller.SetDrive(0b1, 0b0)
+		this.target.SetDrive(0b0, 0b1)
+		Simulation.Wait(80)
+
+		assert this.root.ReadSclDriveLow() == 0b1
+		assert this.root.ReadSdaDriveLow() == 0b1
+	}
+
+	@Test
+	fn TestObservedLinesPropagateToBothAttachments()
+	{
+		this.controller.SetDrive(0b0, 0b0)
+		this.target.SetDrive(0b0, 0b0)
+		Simulation.Wait(400)
+		this.root.SetObservedLines(0b0, 0b1)
+		Simulation.Wait(400)
+
+		assert this.controller.ReadScl() == 0b0
+		assert this.controller.ReadSda() == 0b1
+		assert this.target.ReadScl() == 0b0
+		assert this.target.ReadSda() == 0b1
+	}
+}

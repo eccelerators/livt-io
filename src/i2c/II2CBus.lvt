@@ -1,0 +1,16 @@
+namespace Livt.IO
+
+/**
+ * Open-drain I2C bus contract.
+ *
+ * The bus provider exposes the observed line levels through `scl` and `sda`.
+ * Devices request a low drive through `*_drive_low`; releasing a line is encoded
+ * by writing `0b0` to the drive-low field.
+ */
+interface I2CBus
+{
+	scl: out logic
+	sda: out logic
+	scl_drive_low: in logic
+	sda_drive_low: in logic
+}

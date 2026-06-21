@@ -1,0 +1,101 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+component OpenDrainProbe
+{
+	busAdapter: I2CBus
+	scl_drive_low: logic
+	sda_drive_low: logic
+
+	new(busAdapter: flip I2CBus)
+	{
+		this.busAdapter = busAdapter
+		this.scl_drive_low = 0b0
+		this.sda_drive_low = 0b0
+	}
+
+	process ApplyDrive()
+	{
+		state {
+			this.busAdapter.scl_drive_low = this.scl_drive_low
+			this.busAdapter.sda_drive_low = this.sda_drive_low
+		}
+	}
+
+	public fn DriveSclLow()
+	{
+		this.scl_drive_low = 0b1
+	}
+
+	public fn ReleaseScl()
+	{
+		this.scl_drive_low = 0b0
+	}
+
+	public fn DriveSdaLow()
+	{
+		this.sda_drive_low = 0b1
+	}
+
+	public fn ReleaseSda()
+	{
+		this.sda_drive_low = 0b0
+	}
+
+	public fn ReadScl() logic
+	{
+		return this.busAdapter.scl
+	}
+
+	public fn ReadSda() logic
+	{
+		return this.busAdapter.sda
+	}
+}
+
+@Test
+component I2COpenDrainPinsTest
+{
+	pins: I2COpenDrainPins
+	probe: OpenDrainProbe
+	scl: logic
+	sda: logic
+
+	new()
+	{
+		this.scl = 0bZ
+		this.sda = 0bZ
+		this.pins = new I2COpenDrainPins(this.scl, this.sda)
+		this.probe = new OpenDrainProbe(this.pins)
+	}
+
+	@Test
+	fn TestReleasedLinesReadHigh()
+	{
+		this.probe.ReleaseScl()
+		this.probe.ReleaseSda()
+		Simulation.Wait(80)
+
+		assert this.probe.ReadScl() == 0b1
+		assert this.probe.ReadSda() == 0b1
+	}
+
+	@Test
+	fn TestDriveLowAndRelease()
+	{
+		this.probe.DriveSclLow()
+		this.probe.DriveSdaLow()
+		Simulation.Wait(80)
+
+		assert this.probe.ReadScl() == 0b0
+		assert this.probe.ReadSda() == 0b0
+
+		this.probe.ReleaseScl()
+		this.probe.ReleaseSda()
+		Simulation.Wait(80)
+
+		assert this.probe.ReadScl() == 0b1
+		assert this.probe.ReadSda() == 0b1
+	}
+}
