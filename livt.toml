@@ -25,7 +25,7 @@ components = [
 ]
 
 [build.debug]
-warnings = ["all", "no-variable-divisor"]
+warnings = ["all"]
 
 [build.release]
 warnings = ["all"]
