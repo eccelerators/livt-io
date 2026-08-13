@@ -44,7 +44,7 @@ component I2CMasterTest
 
 	fn WaitForCommand()
 	{
-		Simulation.Wait(2000000)
+		while (this.master.IsBusy()) { state {} }
 	}
 
 	@Test
@@ -160,7 +160,7 @@ component I2CMasterTest
 		var accepted: bool = this.master.BeginStop()
 		assert accepted == true
 
-		Simulation.Wait(1000000)
+		Simulation.Wait(I2CMaster.TICKS_PER_HALF_PERIOD * 2)
 		assert this.master.IsBusy() == true
 
 		this.bus.SetObservedLines(0b1, 0b1)

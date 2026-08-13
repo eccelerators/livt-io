@@ -106,7 +106,7 @@ component BufferedUart
 	 */
 	public fn IsBusy() bool
 	{
-		return this.tx_active
+		return this.tx_active as bool
 	}
 
 	/**

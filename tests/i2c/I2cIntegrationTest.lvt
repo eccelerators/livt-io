@@ -46,7 +46,7 @@ component I2CIntegrationTest
 
 	fn WaitForCommand()
 	{
-		Simulation.Wait(2000000)
+		while (this.master.IsBusy()) { state {} }
 	}
 
 	fn RunStart()
@@ -151,7 +151,7 @@ component I2CReadIntegrationTest
 
 	fn WaitForCommand()
 	{
-		Simulation.Wait(2000000)
+		while (this.master.IsBusy()) { state {} }
 	}
 
 	fn RunStart()
@@ -234,7 +234,7 @@ component I2CRegisterIntegrationTest
 
 	fn WaitForCommand()
 	{
-		Simulation.Wait(2000000)
+		while (this.master.IsBusy()) { state {} }
 	}
 
 	fn RunStart()

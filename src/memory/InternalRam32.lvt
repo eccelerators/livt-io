@@ -1,0 +1,11 @@
+namespace Livt.IO
+
+/** Opaque 2,048 by 32-bit synchronous RAM primitive. */
+@Opaque
+component InternalRam32
+{
+	public write_enable: in logic[4]
+	public address: in logic[11]
+	public write_data: in logic[32]
+	public read_data: out logic[32]
+}

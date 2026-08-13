@@ -1,0 +1,38 @@
+namespace Livt.IO
+
+/** 2,048-cell 16-bit RAM with registered reads and byte write enables. */
+component Ram16
+{
+	public const CAPACITY: int = 2048
+	public const MAX_ADDRESS: int = 2047
+
+	ram: InternalRam16
+
+	new() { ram = new InternalRam16() }
+
+	/** Returns true when address selects a stored 16-bit word. */
+	public fn IsValidAddress(address: int) bool
+	{
+		return address >= 0 && address <= MAX_ADDRESS
+	}
+
+	/** Reads one word, or zero when address is out of range. */
+	public fn Read(address: int) logic[16]
+	{
+		if (!this.IsValidAddress(address)) { return 0 }
+		ram.address = address as logic[11]
+		return ram.read_data
+	}
+
+	/** Writes both bytes of one word; invalid addresses are ignored. */
+	public fn Write(address: int, value: logic[16])
+	{
+		if (!this.IsValidAddress(address)) { return }
+		state {
+			ram.address = address as logic[11]
+			ram.write_data = value
+			ram.write_enable = 0b11
+		}
+		ram.write_enable = 0b00
+	}
+}

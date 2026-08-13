@@ -1,0 +1,48 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component WideRamTest
+{
+	ram16: Ram16
+	ram32: Ram32
+
+	new()
+	{
+		ram16 = new Ram16()
+		ram32 = new Ram32()
+	}
+
+	@Test
+	fn PreservesSignedBitPatternsAndBoundaries()
+	{
+		ram16.Write(0, 0x8001)
+		ram16.Write(2047, 0x7ffe)
+		assert ram16.Read(0) == 0x8001
+		assert ram16.Read(2047) == 0x7ffe
+		assert ram16.Read(-1) == 0
+		assert ram16.Read(2048) == 0
+
+		ram32.Write(0, 0x80000001)
+		ram32.Write(2047, 0x7ffffffe)
+		assert ram32.Read(0) == 0x80000001
+		assert ram32.Read(2047) == 0x7ffffffe
+		assert ram32.Read(-1) == 0
+		assert ram32.Read(2048) == 0
+	}
+
+	@Test
+	fn SupportsRepeatedWrites()
+	{
+		ram16.Write(17, 0x1234)
+		assert ram16.Read(17) == 0x1234
+		ram16.Write(17, 0xfedc)
+		assert ram16.Read(17) == 0xfedc
+
+		ram32.Write(23, 0x12345678)
+		assert ram32.Read(23) == 0x12345678
+		ram32.Write(23, 0xfedcba98)
+		assert ram32.Read(23) == 0xfedcba98
+	}
+}
