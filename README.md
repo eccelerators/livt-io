@@ -1,13 +1,15 @@
 # Livt.IO
 
 `Livt.IO` provides reusable input/output components for the Livt base library.
-It combines byte-addressable memory, UART serial I/O, and protocol bus helpers
-into one package so applications can depend on `Livt.IO` instead of separate
-`Ram` or `Uart` packages.
+It combines byte- and word-addressable memory, UART serial I/O, and protocol bus
+helpers into one package so applications can depend on `Livt.IO` instead of
+separate `Ram` or `Uart` packages.
 
-The 0.2.0 package surface is intentionally small and hardware-oriented:
+The 1.0.1 package surface is intentionally small and hardware-oriented:
 
 - `Livt.IO.Ram`: 2048-byte RAM wrapper backed by an opaque VHDL primitive.
+- `Livt.IO.Ram16`: 2048-word RAM wrapper for 16-bit values.
+- `Livt.IO.Ram32`: 2048-word RAM wrapper for 32-bit values.
 - `Livt.IO.UartReceiver`: 8-N-1 UART receive block.
 - `Livt.IO.UartTransmitter`: 8-N-1 UART transmit block.
 - `Livt.IO.UartBase`: low-level combined RX/TX UART block with explicit signals.
@@ -25,7 +27,7 @@ The 0.2.0 package surface is intentionally small and hardware-oriented:
 
 ```toml
 [dependencies]
-Livt.IO = "0.2.0"
+Livt.IO = "1.0.1"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
@@ -40,7 +42,9 @@ future `SPIMaster` rather than nested protocol namespaces.
 | Component | Synthesizable | Purpose |
 |---|---|---|
 | `Ram` | Yes | Fixed 2048-byte memory with byte reads and writes |
-| `InternalRam` | Yes | Opaque VHDL-backed RAM primitive contract |
+| `Ram16` | Yes | Fixed 2048-word memory with 16-bit reads and writes |
+| `Ram32` | Yes | Fixed 2048-word memory with 32-bit reads and writes |
+| `InternalRam`, `InternalRam16`, `InternalRam32` | Yes | Opaque VHDL-backed RAM primitive contracts |
 | `UartReceiver` | Yes | Serial RX for fixed 8-N-1 frames |
 | `UartTransmitter` | Yes | Serial TX for fixed 8-N-1 frames |
 | `UartBase` | Yes | Combined RX/TX block with explicit handshake signals |
@@ -69,6 +73,10 @@ future `SPIMaster` rather than nested protocol namespaces.
 
 Valid addresses are `0..2047`. Out-of-range reads return `0x00`; out-of-range
 writes are ignored.
+
+`Ram16` and `Ram32` provide the same 2048-address contract for 16-bit and 32-bit
+words. They expose `Read(address)` and `Write(address, value)`; invalid reads
+return zero and invalid writes are ignored.
 
 ### UART
 
@@ -168,7 +176,7 @@ live in [`docs/hardware-notes.md`](docs/hardware-notes.md).
 ## 🚧 Outlook
 
 Future additions may include configurable UART timing, configurable FIFO sizes,
-word-level RAM helpers, dual-port RAM, and root-namespace SPI helpers such as
+partial-word write APIs, dual-port RAM, and root-namespace SPI helpers such as
 `SPIMaster` and `SPISlave`.
 
 ## 📄 License
