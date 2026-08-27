@@ -1,0 +1,505 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Observes controller output and provides deterministic MISO response bytes.
+ */
+component SPIMasterTestBus : SPIBus
+{
+	const MAX_CAPTURED_BYTES: int = 80
+
+	const MAX_CLOCK_EDGES: int = 32
+
+	responseByte: byte
+
+	capturedByte: byte
+
+	capturedBytes: byte[80]
+
+	capturedByteCount: int
+
+	risingEdges: int
+
+	selectEdges: int
+
+	deselectEdges: int
+
+	clockEdgeIntervals: int[32]
+
+	clockEdgeCount: int
+
+	deselectHoldTicks: int
+
+	/**
+	 * Creates an idle SPI test bus with an all-zero response byte.
+	 */
+	new()
+	{
+		this.responseByte = 0x00
+		this.capturedByte = 0x00
+		this.capturedByteCount = 0
+		this.risingEdges = 0
+		this.selectEdges = 0
+		this.deselectEdges = 0
+		this.clockEdgeCount = 0
+		this.deselectHoldTicks = 0
+		this.miso = 0b0
+	}
+
+	/**
+	 * Selects the byte returned on MISO during subsequent transfers.
+	 */
+	public fn SetResponseByte(value: byte)
+	{
+		this.responseByte = value
+	}
+
+	/**
+	 * Returns the most recently captured MOSI byte.
+	 */
+	public fn GetCapturedByte() byte
+	{
+		return this.capturedByte
+	}
+
+	/**
+	 * Returns the number of complete MOSI bytes captured by the fixture.
+	 */
+	public fn GetCapturedByteCount() int
+	{
+		return this.capturedByteCount
+	}
+
+	/**
+	 * Returns a captured MOSI byte or 0x00 when the index is invalid.
+	 */
+	public fn GetCapturedByteAt(index: int) byte
+	{
+		if (index < 0 || index >= this.capturedByteCount) { return 0x00 }
+
+		return this.capturedBytes[index]
+	}
+
+	/**
+	 * Returns the total number of observed SCLK rising edges.
+	 */
+	public fn GetRisingEdges() int
+	{
+		return this.risingEdges
+	}
+
+	/**
+	 * Returns the total number of observed chip-select assertions.
+	 */
+	public fn GetSelectEdges() int
+	{
+		return this.selectEdges
+	}
+
+	/**
+	 * Returns the total number of observed chip-select deassertions.
+	 */
+	public fn GetDeselectEdges() int
+	{
+		return this.deselectEdges
+	}
+
+	/**
+	 * Returns whether SCLK is currently high.
+	 */
+	public fn IsClockHigh() bool
+	{
+		return this.sclk == 0b1
+	}
+
+	/**
+	 * Returns whether the active-low chip select is currently asserted.
+	 */
+	public fn IsChipSelected() bool
+	{
+		return this.chip_select_n == 0b0
+	}
+
+	/**
+	 * Returns the number of SCLK edges recorded since the latest selection.
+	 */
+	public fn GetClockEdgeCount() int
+	{
+		return this.clockEdgeCount
+	}
+
+	/**
+	 * Returns the interval preceding an SCLK edge or zero for an invalid index.
+	 * Index zero measures chip-select setup time before the first rising edge.
+	 */
+	public fn GetClockEdgeInterval(index: int) int
+	{
+		if (index < 0 || index >= this.clockEdgeCount) { return 0 }
+
+		return this.clockEdgeIntervals[index]
+	}
+
+	/**
+	 * Returns the interval from the latest SCLK edge to chip-select release.
+	 */
+	public fn GetDeselectHoldTicks() int
+	{
+		return this.deselectHoldTicks
+	}
+
+	/**
+	 * Drives MISO and records MOSI bytes, bus edges, and timing intervals.
+	 */
+	process ObserveBus()
+	{
+		var capturedValue: int = 0
+		var capturedBits: int = 0
+		var edgeCount: int = 0
+		var selectedCount: int = 0
+		var deselectedCount: int = 0
+		var previousSclk: logic = 0b0
+		var previousChipSelect: logic = 0b1
+		var totalCapturedBytes: int = 0
+		var elapsedTicks: int = 0
+		var previousClockEdgeTick: int = 0
+		var recordedClockEdges: int = 0
+		var recordedDeselectHold: int = 0
+
+		state {
+			elapsedTicks = elapsedTicks + 1
+
+			if (this.chip_select_n == 0b0) {
+				var shiftedResponse = (this.responseByte as int) >> (7 - capturedBits)
+
+				if (shiftedResponse % 2 == 0) {
+					this.miso = 0b0
+				} else {
+					this.miso = 0b1
+				}
+			} else {
+				this.miso = 0b0
+			}
+
+			if (previousChipSelect == 0b1 && this.chip_select_n == 0b0) {
+				selectedCount = selectedCount + 1
+				capturedValue = 0
+				capturedBits = 0
+				previousClockEdgeTick = elapsedTicks
+				recordedClockEdges = 0
+			}
+
+			if (previousChipSelect == 0b0 && this.chip_select_n == 0b1) {
+				deselectedCount = deselectedCount + 1
+				recordedDeselectHold = elapsedTicks - previousClockEdgeTick
+			}
+
+			if (this.chip_select_n == 0b0 && previousSclk != this.sclk) {
+				var edgeInterval = elapsedTicks - previousClockEdgeTick
+
+				if (recordedClockEdges < MAX_CLOCK_EDGES) {
+					this.clockEdgeIntervals[recordedClockEdges] = edgeInterval
+					recordedClockEdges = recordedClockEdges + 1
+				}
+
+				previousClockEdgeTick = elapsedTicks
+			}
+
+			if (this.chip_select_n == 0b0 && previousSclk == 0b0 && this.sclk == 0b1) {
+				capturedValue = capturedValue << 1
+
+				if (this.mosi == 0b1) { capturedValue = capturedValue + 1 }
+
+				capturedBits = capturedBits + 1
+				edgeCount = edgeCount + 1
+
+				if (capturedBits == 8) {
+					var completedByte = capturedValue as byte
+					this.capturedByte = completedByte
+
+					if (totalCapturedBytes < MAX_CAPTURED_BYTES) {
+						this.capturedBytes[totalCapturedBytes] = completedByte
+						totalCapturedBytes = totalCapturedBytes + 1
+					}
+
+					capturedBits = 0
+					capturedValue = 0
+				}
+			}
+
+			this.risingEdges = edgeCount
+			this.capturedByteCount = totalCapturedBytes
+			this.selectEdges = selectedCount
+			this.deselectEdges = deselectedCount
+			this.clockEdgeCount = recordedClockEdges
+			this.deselectHoldTicks = recordedDeselectHold
+			previousSclk = this.sclk
+			previousChipSelect = this.chip_select_n
+		}
+	}
+}
+
+/**
+ * Verifies SPI Mode 0 behavior in a 100 MHz component context.
+ */
+@Test
+@Context(ClockFrequency = 100MHz)
+component SPIMasterTest
+{
+	bus: SPIMasterTestBus
+
+	master: SPIMaster
+
+	/**
+	 * Creates the controller and its observing bus fixture.
+	 */
+	new()
+	{
+		this.bus = new SPIMasterTestBus()
+		this.master = new SPIMaster(this.bus)
+	}
+
+	/**
+	 * Waits for the current asynchronous command to finish.
+	 */
+	fn WaitForCommand()
+	{
+		while (this.master.IsBusy()) {
+			state {}
+		}
+
+		state {}
+	}
+
+	/**
+	 * Selects the fixture and verifies the selected state.
+	 */
+	fn SelectDevice()
+	{
+		assert this.master.BeginSelect() == true
+		this.WaitForCommand()
+		assert this.master.IsSelected() == true
+	}
+
+	/**
+	 * Deselects the fixture and verifies the idle selection state.
+	 */
+	fn DeselectDevice()
+	{
+		assert this.master.BeginDeselect() == true
+		this.WaitForCommand()
+		assert this.master.IsSelected() == false
+	}
+
+	/**
+	 * Exchanges one byte and returns the received value.
+	 */
+	fn TransferByte(value: byte) byte
+	{
+		assert this.master.BeginTransfer(value) == true
+		this.WaitForCommand()
+		return this.master.GetReceivedByte()
+	}
+
+	/**
+	 * Verifies every SCLK half-period recorded for one byte transfer.
+	 */
+	fn AssertClockTiming(expectedHalfPeriod: int)
+	{
+		assert this.bus.GetClockEdgeCount() == 16
+		assert this.bus.GetClockEdgeInterval(0) >= expectedHalfPeriod
+
+		for (var edgeIndex = 1; edgeIndex < 16; edgeIndex++) {
+			assert this.bus.GetClockEdgeInterval(edgeIndex) == expectedHalfPeriod
+		}
+	}
+
+	/**
+	 * Verifies that a 100 MHz context produces five ticks per half-period.
+	 */
+	@Test
+	fn TestContextDerivesTenMegahertzTiming()
+	{
+		assert this.master.HalfPeriodTicks() == 0n5
+	}
+
+	/**
+	 * Verifies idle outputs, sticky completion, and rejected selection commands.
+	 */
+	@Test
+	fn TestIdleAndTransactionSelection()
+	{
+		assert this.bus.IsClockHigh() == false
+		assert this.bus.IsChipSelected() == false
+		assert this.master.HasResult() == false
+		assert this.master.GetReceivedByte() == 0x00
+		assert this.master.BeginDeselect() == false
+		assert this.master.BeginTransfer(0x55) == false
+		var selectEdgesBefore = this.bus.GetSelectEdges()
+		assert this.master.BeginSelect() == true
+		assert this.master.BeginSelect() == false
+		this.WaitForCommand()
+		assert this.bus.IsChipSelected() == true
+		assert this.bus.IsClockHigh() == false
+		assert this.bus.GetSelectEdges() == selectEdgesBefore + 1
+		assert this.master.IsSelected() == true
+		assert this.master.HasResult() == true
+		assert this.master.BeginSelect() == false
+		this.master.ClearResult()
+		assert this.master.HasResult() == false
+		var deselectEdgesBefore = this.bus.GetDeselectEdges()
+		assert this.master.BeginDeselect() == true
+		assert this.master.BeginDeselect() == false
+		this.WaitForCommand()
+		assert this.master.IsSelected() == false
+		assert this.master.HasResult() == true
+		assert this.bus.IsChipSelected() == false
+		assert this.bus.GetDeselectEdges() == deselectEdgesBefore + 1
+	}
+
+	/**
+	 * Verifies full-duplex, most-significant-bit-first byte transfer behavior.
+	 */
+	@Test
+	fn TestTransferIsFullDuplexAndMostSignificantBitFirst()
+	{
+		this.SelectDevice()
+		this.bus.SetResponseByte(0x3C)
+		assert this.master.BeginTransfer(0xA5) == true
+		assert this.master.BeginTransfer(0x00) == false
+		this.WaitForCommand()
+		assert this.master.HasResult() == true
+		assert this.master.GetReceivedByte() == 0x3C
+		assert this.bus.GetCapturedByte() == 0xA5
+		assert this.bus.GetRisingEdges() == 8
+		assert this.master.IsSelected() == true
+		assert this.bus.IsClockHigh() == false
+		this.DeselectDevice()
+	}
+
+	/**
+	 * Verifies five-tick SCLK phases and chip-select setup and hold intervals.
+	 */
+	@Test
+	fn TestWaveformTimingAtOneHundredMegahertz()
+	{
+		this.SelectDevice()
+		this.TransferByte(0xA5)
+		this.AssertClockTiming(5)
+		this.DeselectDevice()
+		assert this.bus.GetDeselectHoldTicks() >= 5
+	}
+
+	/**
+	 * Verifies that consecutive bytes do not release chip select.
+	 */
+	@Test
+	fn TestConsecutiveTransfersKeepChipSelectAsserted()
+	{
+		this.SelectDevice()
+		var selectEdgesAfterSelection = this.bus.GetSelectEdges()
+		var risingEdgesBefore = this.bus.GetRisingEdges()
+		this.bus.SetResponseByte(0xFF)
+		assert this.master.BeginTransfer(0x03) == true
+		this.WaitForCommand()
+		assert this.master.GetReceivedByte() == 0xFF
+		this.master.ClearResult()
+		assert this.master.HasResult() == false
+		this.bus.SetResponseByte(0x5A)
+		assert this.master.BeginTransfer(0x00) == true
+		this.WaitForCommand()
+		assert this.master.GetReceivedByte() == 0x5A
+		assert this.bus.GetCapturedByte() == 0x00
+		assert this.bus.GetRisingEdges() == risingEdgesBefore + 16
+		assert this.bus.GetSelectEdges() == selectEdgesAfterSelection
+		assert this.master.IsSelected() == true
+		this.DeselectDevice()
+	}
+
+	/**
+	 * Verifies a flash-style command, address, and data transaction.
+	 */
+	@Test
+	fn TestFlashReadSequenceUsesOneContinuousTransaction()
+	{
+		this.SelectDevice()
+		var capturedBefore = this.bus.GetCapturedByteCount()
+		var selectEdgesAfterSelection = this.bus.GetSelectEdges()
+		this.bus.SetResponseByte(0x00)
+		this.TransferByte(0x03)
+		this.TransferByte(0x12)
+		this.TransferByte(0x34)
+		this.TransferByte(0x40)
+		this.bus.SetResponseByte(0xDE)
+		var firstData = this.TransferByte(0x00)
+		this.bus.SetResponseByte(0xAD)
+		var secondData = this.TransferByte(0x00)
+		assert firstData == 0xDE
+		assert secondData == 0xAD
+		assert this.bus.GetCapturedByteCount() == capturedBefore + 6
+		assert this.bus.GetCapturedByteAt(capturedBefore) == 0x03
+		assert this.bus.GetCapturedByteAt(capturedBefore + 1) == 0x12
+		assert this.bus.GetCapturedByteAt(capturedBefore + 2) == 0x34
+		assert this.bus.GetCapturedByteAt(capturedBefore + 3) == 0x40
+		assert this.bus.GetCapturedByteAt(capturedBefore + 4) == 0x00
+		assert this.bus.GetCapturedByteAt(capturedBefore + 5) == 0x00
+		assert this.bus.GetSelectEdges() == selectEdgesAfterSelection
+		this.DeselectDevice()
+	}
+}
+
+/**
+ * Verifies context-derived SPI timing in a 50 MHz component context.
+ */
+@Test
+@Context(ClockFrequency = 50MHz)
+component SPIMasterSlowContextTest
+{
+	bus: SPIMasterTestBus
+
+	master: SPIMaster
+
+	/**
+	 * Creates the controller and its observing bus fixture.
+	 */
+	new()
+	{
+		this.bus = new SPIMasterTestBus()
+		this.master = new SPIMaster(this.bus)
+	}
+
+	/**
+	 * Waits for the current asynchronous command to finish.
+	 */
+	fn WaitForCommand()
+	{
+		while (this.master.IsBusy()) {
+			state {}
+		}
+
+		state {}
+	}
+
+	/**
+	 * Verifies three-tick SCLK phases and chip-select setup and hold intervals.
+	 */
+	@Test
+	fn TestHalfPeriodRoundsUpInSlowerContext()
+	{
+		assert this.master.HalfPeriodTicks() == 0n3
+		assert this.master.BeginSelect() == true
+		this.WaitForCommand()
+		assert this.master.BeginTransfer(0xA5) == true
+		this.WaitForCommand()
+		assert this.bus.GetClockEdgeCount() == 16
+		assert this.bus.GetClockEdgeInterval(0) >= 3
+
+		for (var edgeIndex = 1; edgeIndex < 16; edgeIndex++) {
+			assert this.bus.GetClockEdgeInterval(edgeIndex) == 3
+		}
+
+		assert this.master.BeginDeselect() == true
+		this.WaitForCommand()
+		assert this.bus.GetDeselectHoldTicks() >= 3
+	}
+}

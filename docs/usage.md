@@ -219,3 +219,76 @@ write bytes store values into the current register and advance the pointer, so a
 master can write `0x01, 0x7F` to set register `0x01` to `0x7F`. Reads return the
 current register value prepared through the underlying `I2CSlave`; ACKed
 read bytes advance the pointer for repeated multi-byte reads.
+
+## SPI Master
+
+`SPIMaster` consumes a flipped `SPIBus` attachment. A board-level provider or
+test fixture owns the bus and connects it to physical signals.
+
+```livt
+using Livt.IO
+
+component FlashByteReader
+{
+	master: SPIMaster
+
+	/**
+	 * Creates a byte reader attached to one SPI flash bus.
+	 */
+	new(bus: flip SPIBus)
+	{
+		this.master = new SPIMaster(bus)
+	}
+
+	/**
+	 * Reads one byte with command 0x03 and a 24-bit flash address.
+	 */
+	public fn ReadByte(address: int) byte
+	{
+		while (!this.master.BeginSelect()) {
+			state {}
+		}
+		while (this.master.IsBusy()) {
+			state {}
+		}
+
+		this.Transfer(0x03)
+		this.Transfer((address >> 16) as byte)
+		this.Transfer((address >> 8) as byte)
+		this.Transfer(address as byte)
+		var value = this.Transfer(0x00)
+
+		while (!this.master.BeginDeselect()) {
+			state {}
+		}
+		while (this.master.IsBusy()) {
+			state {}
+		}
+
+		return value
+	}
+
+	/**
+	 * Exchanges one byte while preserving the active transaction.
+	 */
+	fn Transfer(value: byte) byte
+	{
+		while (!this.master.BeginTransfer(value)) {
+			state {}
+		}
+		while (this.master.IsBusy()) {
+			state {}
+		}
+
+		return this.master.GetReceivedByte()
+	}
+}
+```
+
+The example keeps chip select asserted across the command, address, and data
+byte, then completes the transaction with `BeginDeselect()`. Additional
+`Transfer(0x00)` calls can be inserted before deselection for sequential reads.
+
+The master derives its 50 ns SCLK half-period from the context it inherits
+during construction. Place the containing component in the desired clock
+context so construction and the controller process use the same domain.

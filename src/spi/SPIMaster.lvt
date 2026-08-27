@@ -1,0 +1,301 @@
+namespace Livt.IO
+
+/**
+ * Byte-level, single-device SPI Mode 0 controller.
+ *
+ * Bytes are transferred most-significant bit first. Chip select is controlled
+ * separately so callers can keep one transaction active across command,
+ * address, and payload bytes. Timing is derived from the component context;
+ * the requested 50 ns half-period produces an SPI clock no faster than 10 MHz.
+ */
+component SPIMaster
+{
+	const COMMAND_NONE: int = 0
+
+	const COMMAND_SELECT: int = 1
+
+	const COMMAND_DESELECT: int = 2
+
+	const COMMAND_TRANSFER: int = 3
+
+	bus: SPIBus
+
+	busy: bool
+
+	selected: bool
+
+	hasResult: bool
+
+	resultByte: byte
+
+	transmitByte: byte
+
+	command: int
+
+	halfPeriodTicks: uint
+
+	/**
+	 * Creates an idle Mode 0 controller attached to the supplied SPI bus.
+	 *
+	 * SCLK and MOSI start low, chip select starts high, and no command result is
+	 * pending. The SCLK divider is derived from the inherited component context.
+	 */
+	new(bus: flip SPIBus)
+	{
+		this.bus = bus
+		this.bus.sclk = 0b0
+		this.bus.mosi = 0b0
+		this.bus.chip_select_n = 0b1
+		this.busy = false
+		this.selected = false
+		this.hasResult = false
+		this.resultByte = 0x00
+		this.transmitByte = 0x00
+		this.command = COMMAND_NONE
+		this.halfPeriodTicks = this.context.TicksFor(50ns)
+	}
+
+	/**
+	 * Returns the number of context ticks used for one SCLK half-period.
+	 */
+	public fn HalfPeriodTicks() uint
+	{
+		return this.halfPeriodTicks
+	}
+
+	/**
+	 * Starts chip-select assertion and returns false when busy or already
+	 * selected. A false result leaves the controller unchanged.
+	 */
+	public fn BeginSelect() bool
+	{
+		if (this.busy || this.selected) { return false }
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.command = COMMAND_SELECT
+		}
+
+		return true
+	}
+
+	/**
+	 * Starts chip-select deassertion and returns false when busy or not selected.
+	 * A false result leaves the controller unchanged.
+	 */
+	public fn BeginDeselect() bool
+	{
+		if (this.busy || !this.selected) { return false }
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.command = COMMAND_DESELECT
+		}
+
+		return true
+	}
+
+	/**
+	 * Starts one full-duplex byte transfer and returns false when busy or when
+	 * chip select is inactive. A false result leaves the controller unchanged.
+	 */
+	public fn BeginTransfer(data: byte) bool
+	{
+		if (this.busy || !this.selected) { return false }
+
+		state {
+			this.busy = true
+			this.hasResult = false
+			this.resultByte = 0x00
+			this.transmitByte = data
+			this.command = COMMAND_TRANSFER
+		}
+
+		return true
+	}
+
+	/**
+	 * Returns whether a select, deselect, or transfer command is active.
+	 */
+	public fn IsBusy() bool
+	{
+		return this.busy
+	}
+
+	/**
+	 * Returns whether chip select is currently asserted.
+	 */
+	public fn IsSelected() bool
+	{
+		return this.selected
+	}
+
+	/**
+	 * Returns whether the most recent accepted command has completed.
+	 */
+	public fn HasResult() bool
+	{
+		return this.hasResult
+	}
+
+	/**
+	 * Returns the byte sampled by the most recent completed transfer.
+	 *
+	 * Before the first transfer this returns 0x00. Select and deselect commands
+	 * leave the last received byte unchanged.
+	 */
+	public fn GetReceivedByte() byte
+	{
+		return this.resultByte
+	}
+
+	/**
+	 * Clears the sticky command-completion indication without changing data.
+	 */
+	public fn ClearResult()
+	{
+		this.hasResult = false
+	}
+
+	/**
+	 * Executes accepted commands and generates Mode 0 bus timing.
+	 */
+	process Main()
+	{
+		var phaseTick: uint = 0n0
+		var bitIndex: int = 0
+
+		state Idle {
+			phaseTick = 0n0
+			bitIndex = 0
+			this.bus.sclk = 0b0
+			this.bus.mosi = 0b0
+
+			if (this.selected) {
+				this.bus.chip_select_n = 0b0
+			} else {
+				this.bus.chip_select_n = 0b1
+			}
+
+			if (!this.busy) {
+				goto Idle
+			} elif (this.command == COMMAND_SELECT) {
+				goto SelectDrive
+			} elif (this.command == COMMAND_DESELECT) {
+				goto DeselectDrive
+			} elif (this.command == COMMAND_TRANSFER) {
+				goto TransferLowDrive
+			} else {
+				goto Idle
+			}
+		}
+
+		state SelectDrive {
+			this.bus.chip_select_n = 0b0
+			this.bus.sclk = 0b0
+			this.bus.mosi = 0b0
+			goto SelectWait
+		}
+
+		state SelectWait {
+			if (phaseTick + 0n1 < this.halfPeriodTicks) {
+				phaseTick = phaseTick + 0n1
+				goto SelectWait
+			} else {
+				this.selected = true
+				this.busy = false
+				this.hasResult = true
+				this.command = COMMAND_NONE
+				goto Idle
+			}
+		}
+
+		state DeselectDrive {
+			this.bus.chip_select_n = 0b0
+			this.bus.sclk = 0b0
+			this.bus.mosi = 0b0
+			goto DeselectWait
+		}
+
+		state DeselectWait {
+			if (phaseTick + 0n1 < this.halfPeriodTicks) {
+				phaseTick = phaseTick + 0n1
+				goto DeselectWait
+			} else {
+				this.bus.chip_select_n = 0b1
+				this.selected = false
+				this.busy = false
+				this.hasResult = true
+				this.command = COMMAND_NONE
+				goto Idle
+			}
+		}
+
+		state TransferLowDrive {
+			this.bus.chip_select_n = 0b0
+			this.bus.sclk = 0b0
+			var shiftedTransmit = (this.transmitByte as int) >> (7 - bitIndex)
+
+			if (shiftedTransmit % 2 == 0) {
+				this.bus.mosi = 0b0
+			} else {
+				this.bus.mosi = 0b1
+			}
+
+			goto TransferLowWait
+		}
+
+		state TransferLowWait {
+			if (phaseTick + 0n1 < this.halfPeriodTicks) {
+				phaseTick = phaseTick + 0n1
+				goto TransferLowWait
+			} else {
+				phaseTick = 0n0
+				this.bus.sclk = 0b1
+				goto TransferHighWait
+			}
+		}
+
+		state TransferHighWait {
+			if (phaseTick + 0n1 < this.halfPeriodTicks) {
+				phaseTick = phaseTick + 0n1
+				goto TransferHighWait
+			} else {
+				var receivedValue = (this.resultByte as int) << 1
+
+				if (this.bus.miso == 0b1) { receivedValue = receivedValue + 1 }
+
+				this.resultByte = receivedValue as byte
+				this.bus.sclk = 0b0
+				phaseTick = 0n0
+
+				if (bitIndex < 7) {
+					bitIndex = bitIndex + 1
+					var nextShiftedTransmit = (this.transmitByte as int) >> (7 - bitIndex)
+
+					if (nextShiftedTransmit % 2 == 0) {
+						this.bus.mosi = 0b0
+					} else {
+						this.bus.mosi = 0b1
+					}
+
+					goto TransferLowWait
+				} else {
+					goto TransferComplete
+				}
+			}
+		}
+
+		state TransferComplete {
+			this.bus.chip_select_n = 0b0
+			this.bus.sclk = 0b0
+			this.bus.mosi = 0b0
+			this.busy = false
+			this.hasResult = true
+			this.command = COMMAND_NONE
+			goto Idle
+		}
+	}
+}

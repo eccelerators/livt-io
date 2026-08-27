@@ -85,5 +85,36 @@ register value for transmission. ACKed transmitted bytes advance the pointer and
 prepare the next register value for repeated multi-byte reads; NACK leaves the
 pointer at the last transmitted register.
 
-No configurable RAM depth, UART baud, parity, FIFO size, or I2C timing is
-exposed in `Livt.IO 0.2.0`. Those are expected future package additions.
+## SPI
+
+`SPIMaster` is a push-pull, single-controller implementation with these fixed
+wire-level properties:
+
+- SPI Mode 0 (`CPOL = 0`, `CPHA = 0`)
+- most-significant bit first
+- one MOSI data lane and one MISO data lane
+- one active-low chip select
+- 50 ns requested half-period, giving at most 10 MHz SCLK
+
+The half-period tick count is obtained from the component context during
+construction. At 100 MHz it is five ticks; at 50 MHz it rounds up to three
+ticks. Keep the master in the context it inherits during construction so the
+stored divider and sequential process use the same clock metadata.
+
+Startup and reset leave the master idle with SCLK low, MOSI low, chip select
+high, no command result pending, and a zero received byte. Selection waits at
+least one half-period before a transfer can start. Deselection preserves at
+least one half-period of hold time after the final SCLK edge.
+
+Chip select remains asserted between completed byte transfers. This supports
+flash protocols that send a command and address before streaming data. Modes 1
+through 3, LSB-first transfers, multiple chip selects, dual SPI, quad SPI, and
+SPI target behavior are outside the 1.1.0 contract.
+
+Configuration-flash access may require vendor-specific routing. In particular,
+an AMD 7-series board can require `STARTUPE2` to route user logic to the shared
+configuration clock. Keep that primitive and board constraints outside
+`Livt.IO`; adapt its signals to the portable `SPIBus` contract.
+
+No configurable RAM depth, UART baud, parity, FIFO size, I2C timing, or SPI mode
+is exposed in `Livt.IO 1.1.0`. Those are expected future package additions.

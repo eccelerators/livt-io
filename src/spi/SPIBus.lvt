@@ -1,0 +1,19 @@
+namespace Livt.IO
+
+/**
+ * Push-pull, single-data-lane SPI bus contract.
+ *
+ * The bus provider exposes MISO to the controller and accepts SCLK, MOSI, and
+ * the active-low chip-select signal from the controller. At controller reset,
+ * providers observe SCLK low, MOSI low, and chip select high.
+ */
+interface SPIBus
+{
+	sclk: in logic
+
+	mosi: in logic
+
+	miso: out logic
+
+	chip_select_n: in logic
+}

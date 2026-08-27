@@ -1,6 +1,6 @@
 [project]
 name = "Livt.IO"
-version = "1.0.1"
+version = "1.1.0"
 path = "src"
 outdir = "out"
 
@@ -21,7 +21,9 @@ components = [
     "I2CRegisterSlaveTest",
     "I2CIntegrationTest",
     "I2CReadIntegrationTest",
-    "I2CRegisterIntegrationTest"
+    "I2CRegisterIntegrationTest",
+    "SPIMasterTest",
+    "SPIMasterSlowContextTest"
 ]
 
 [build.debug]

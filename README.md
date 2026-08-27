@@ -5,7 +5,7 @@ It combines byte- and word-addressable memory, UART serial I/O, and protocol bus
 helpers into one package so applications can depend on `Livt.IO` instead of
 separate `Ram` or `Uart` packages.
 
-The 1.0.1 package surface is intentionally small and hardware-oriented:
+The 1.1.0 package surface is intentionally small and hardware-oriented:
 
 - `Livt.IO.Ram`: 2048-byte RAM wrapper backed by an opaque VHDL primitive.
 - `Livt.IO.Ram16`: 2048-word RAM wrapper for 16-bit values.
@@ -22,12 +22,14 @@ The 1.0.1 package surface is intentionally small and hardware-oriented:
 - `Livt.IO.I2CMaster`: byte-level standard-mode I2C master.
 - `Livt.IO.I2CSlave`: byte-event standard-mode I2C target.
 - `Livt.IO.I2CRegisterSlave`: 256-byte register-file helper for I2C targets.
+- `Livt.IO.SPIBus`: push-pull, single-data-lane SPI bus contract.
+- `Livt.IO.SPIMaster`: context-timed, byte-level SPI Mode 0 controller.
 
 ## 📦 Package
 
 ```toml
 [dependencies]
-Livt.IO = "1.0.1"
+Livt.IO = "1.1.0"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
@@ -37,7 +39,7 @@ should depend on `Livt.IO`; `Livt.IO` supersedes the standalone `Ram` and `Uart`
 
 `Livt.IO` keeps public components in the root namespace for short, compatible
 call sites. Protocol components use readable prefixes such as `I2CMaster` and
-future `SPIMaster` rather than nested protocol namespaces.
+`SPIMaster` rather than nested protocol namespaces.
 
 | Component | Synthesizable | Purpose |
 |---|---|---|
@@ -57,6 +59,8 @@ future `SPIMaster` rather than nested protocol namespaces.
 | `I2CMaster` | Yes | Byte-level standard-mode I2C master |
 | `I2CSlave` | Yes | Byte-event standard-mode I2C target |
 | `I2CRegisterSlave` | Yes | 256-byte register-file helper built on `I2CSlave` |
+| `SPIBus` | Yes | Push-pull, single-data-lane SPI bus interface |
+| `SPIMaster` | Yes | Byte-level SPI Mode 0 master with context-derived timing |
 
 ## 🔌 API Overview
 
@@ -146,6 +150,31 @@ ACKed transmitted bytes advance the pointer for repeated multi-byte reads.
 - `HasWrittenRegister()`, `GetWrittenRegister()`, `GetWrittenValue()`,
   `ClearWrittenRegister()`
 
+### SPI
+
+`SPIMaster` implements single-data-lane SPI Mode 0 with MSB-first, full-duplex
+byte transfers. Chip select is controlled separately so a command, address,
+and payload can remain in one transaction:
+
+- `BeginSelect()` asserts the active-low chip select.
+- `BeginTransfer(data)` exchanges one byte while chip select remains asserted.
+- `BeginDeselect()` releases chip select after its hold interval.
+- `IsBusy()`, `IsSelected()`, `HasResult()`, and `ClearResult()` expose state.
+- `GetReceivedByte()` returns the byte sampled during the last transfer.
+- `HalfPeriodTicks()` returns the context-derived SCLK half-period.
+
+Accepted commands complete asynchronously. A `Begin*` call returns `false`
+when its preconditions are not satisfied and leaves the controller unchanged.
+
+The requested SCLK half-period is 50 ns. `SPIMaster` converts that duration with
+`this.context.TicksFor(50ns)` during construction, so a parent-selected clock
+context determines the divider. Positive durations round up to a complete
+context tick; the resulting SCLK therefore never exceeds 10 MHz.
+
+At startup and reset, the controller is idle and deselected: SCLK and MOSI are
+low, chip select is high, and `HasResult()` is false. The first received byte is
+`0x00`.
+
 ## 🧪 Build and Test
 
 ```sh
@@ -159,15 +188,16 @@ rm -rf out .livt/src.json .livt/ghdl
 livt test
 ```
 
-Short examples live in [`docs/usage.md`](docs/usage.md). I2C-specific examples
-and caveats live in [`docs/i2c.md`](docs/i2c.md). Hardware and synthesis notes
-live in [`docs/hardware-notes.md`](docs/hardware-notes.md).
+Short examples live in [`docs/usage.md`](docs/usage.md). Protocol details and
+caveats live in [`docs/i2c.md`](docs/i2c.md) and [`docs/spi.md`](docs/spi.md).
+Hardware and synthesis notes live in
+[`docs/hardware-notes.md`](docs/hardware-notes.md).
 
 ## 🛠️ Development Notes
 
 - Keep public components in `namespace Livt.IO`.
 - Prefix protocol components with the protocol acronym, for example `I2CMaster`
-  and future `SPIMaster`.
+  and `SPIMaster`.
 - Keep tests in `namespace Livt.IO.Tests`.
 - Use `byte` for byte-oriented public APIs.
 - Keep implementation notes and hardware caveats in `docs/hardware-notes.md`.
@@ -176,8 +206,8 @@ live in [`docs/hardware-notes.md`](docs/hardware-notes.md).
 ## 🚧 Outlook
 
 Future additions may include configurable UART timing, configurable FIFO sizes,
-partial-word write APIs, dual-port RAM, and root-namespace SPI helpers such as
-`SPIMaster` and `SPISlave`.
+partial-word write APIs, dual-port RAM, SPI modes 1 through 3, multiple chip
+selects, quad-SPI transfers, and `SPISlave`.
 
 ## 📄 License
 
