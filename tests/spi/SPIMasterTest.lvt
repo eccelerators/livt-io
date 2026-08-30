@@ -318,7 +318,7 @@ component SPIMasterTest
 	 * Verifies that a 100 MHz context produces five ticks per half-period.
 	 */
 	@Test
-	fn TestContextDerivesTenMegahertzTiming()
+	fn TestContextDerivesConservativeTiming()
 	{
 		assert this.master.HalfPeriodTicks() == 0n5
 	}

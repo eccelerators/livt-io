@@ -1,0 +1,93 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component DistributedRamTest
+{
+	ram16: DistributedRam32x16
+	ram32: DistributedRam32x32
+	ramBytes: DistributedRam8x64
+
+	new()
+	{
+		this.ram16 = new DistributedRam32x16()
+		this.ram32 = new DistributedRam32x32()
+		this.ramBytes = new DistributedRam8x64()
+	}
+
+	fn Write16(address: int, value: int)
+	{
+		state {
+			this.ram16.address = address as logic[4]
+			this.ram16.write_data = value as logic[32]
+			this.ram16.write_enable = 0b1
+		}
+		state { this.ram16.write_enable = 0b0 }
+	}
+
+	fn Read16(address: int) int
+	{
+		state { this.ram16.address = address as logic[4] }
+		state {}
+		state {}
+		return this.ram16.read_data as int
+	}
+
+	fn Write32(address: int, value: int)
+	{
+		state {
+			this.ram32.address = address as logic[5]
+			this.ram32.write_data = value as logic[32]
+			this.ram32.write_enable = 0b1
+		}
+		state { this.ram32.write_enable = 0b0 }
+	}
+
+	fn Read32(address: int) int
+	{
+		state { this.ram32.address = address as logic[5] }
+		state {}
+		state {}
+		return this.ram32.read_data as int
+	}
+
+	fn WriteByte(address: int, value: byte)
+	{
+		state {
+			this.ramBytes.address = address as logic[6]
+			this.ramBytes.write_data = value as logic[8]
+			this.ramBytes.write_enable = 0b1
+		}
+		state { this.ramBytes.write_enable = 0b0 }
+	}
+
+	fn ReadByte(address: int) byte
+	{
+		state { this.ramBytes.address = address as logic[6] }
+		state {}
+		state {}
+		return this.ramBytes.read_data as byte
+	}
+
+	@Test
+	fn StoresIndependentBoundaryWords()
+	{
+		this.Write16(0, 0x12345678)
+		this.Write16(15, -7)
+		assert this.Read16(0) == 0x12345678
+		assert this.Read16(15) == -7
+
+		this.Write32(0, 17)
+		this.Write32(16, 23)
+		this.Write32(31, -31)
+		assert this.Read32(0) == 17
+		assert this.Read32(16) == 23
+		assert this.Read32(31) == -31
+
+		this.WriteByte(0, 0x12)
+		this.WriteByte(63, 0xab)
+		assert this.ReadByte(0) == 0x12
+		assert this.ReadByte(63) == 0xab
+	}
+}

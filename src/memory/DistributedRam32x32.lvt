@@ -1,0 +1,17 @@
+namespace Livt.IO
+
+/**
+ * Resource-compact 32 by 32-bit asynchronous-read distributed RAM.
+ *
+ * Writes occur on the rising clock edge when `write_enable` is asserted. Read
+ * data follows `address` asynchronously. It is sized for short vector and
+ * attention histories that benefit from indexed storage without a block RAM.
+ */
+@Opaque
+component DistributedRam32x32
+{
+	public write_enable: in logic
+	public address: in logic[5]
+	public write_data: in logic[32]
+	public read_data: out logic[32]
+}

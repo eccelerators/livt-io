@@ -1,0 +1,18 @@
+namespace Livt.IO
+
+/**
+ * Resource-compact 16 by 32-bit asynchronous-read distributed RAM.
+ *
+ * Writes occur on the rising clock edge when `write_enable` is asserted. Read
+ * data follows `address` asynchronously. This primitive is intended for small
+ * FPGA scratchpads where allocating the 2,048-word `Ram32` would waste block
+ * RAM capacity.
+ */
+@Opaque
+component DistributedRam32x16
+{
+	public write_enable: in logic
+	public address: in logic[4]
+	public write_data: in logic[32]
+	public read_data: out logic[32]
+}

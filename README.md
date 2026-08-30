@@ -10,6 +10,9 @@ The 1.1.0 package surface is intentionally small and hardware-oriented:
 - `Livt.IO.Ram`: 2048-byte RAM wrapper backed by an opaque VHDL primitive.
 - `Livt.IO.Ram16`: 2048-word RAM wrapper for 16-bit values.
 - `Livt.IO.Ram32`: 2048-word RAM wrapper for 32-bit values.
+- `Livt.IO.DistributedRam32x16`: exact 32-word, 16-bit distributed RAM.
+- `Livt.IO.DistributedRam32x32`: exact 32-word, 32-bit distributed RAM.
+- `Livt.IO.DistributedRam8x64`: exact 64-byte distributed RAM.
 - `Livt.IO.UartReceiver`: 8-N-1 UART receive block.
 - `Livt.IO.UartTransmitter`: 8-N-1 UART transmit block.
 - `Livt.IO.UartBase`: low-level combined RX/TX UART block with explicit signals.
@@ -46,6 +49,9 @@ call sites. Protocol components use readable prefixes such as `I2CMaster` and
 | `Ram` | Yes | Fixed 2048-byte memory with byte reads and writes |
 | `Ram16` | Yes | Fixed 2048-word memory with 16-bit reads and writes |
 | `Ram32` | Yes | Fixed 2048-word memory with 32-bit reads and writes |
+| `DistributedRam32x16` | Yes | 32-word, 16-bit single-port distributed RAM |
+| `DistributedRam32x32` | Yes | 32-word, 32-bit single-port distributed RAM |
+| `DistributedRam8x64` | Yes | 64-byte single-port distributed RAM |
 | `InternalRam`, `InternalRam16`, `InternalRam32` | Yes | Opaque VHDL-backed RAM primitive contracts |
 | `UartReceiver` | Yes | Serial RX for fixed 8-N-1 frames |
 | `UartTransmitter` | Yes | Serial TX for fixed 8-N-1 frames |
@@ -81,6 +87,14 @@ writes are ignored.
 `Ram16` and `Ram32` provide the same 2048-address contract for 16-bit and 32-bit
 words. They expose `Read(address)` and `Write(address, value)`; invalid reads
 return zero and invalid writes are ignored.
+
+The `DistributedRam*` components cover small, exact-sized stores that should
+map to FPGA LUT RAM rather than flip-flop arrays or a mostly empty block RAM.
+They provide asynchronous reads and synchronous writes through `Read(address)`
+and `Write(address, value)`. Addresses are statically bounded by each component
+(`0..31` or `0..63`). The opaque VHDL implementations carry the Xilinx
+`ram_style = "distributed"` synthesis attribute while keeping the Livt-facing
+API vendor-neutral.
 
 ### UART
 
@@ -169,7 +183,9 @@ when its preconditions are not satisfied and leaves the controller unchanged.
 The requested SCLK half-period is 50 ns. `SPIMaster` converts that duration with
 `this.context.TicksFor(50ns)` during construction, so a parent-selected clock
 context determines the divider. Positive durations round up to a complete
-context tick; the resulting SCLK therefore never exceeds 10 MHz.
+context tick; the resulting SCLK therefore never exceeds 10 MHz. MISO is
+sampled on the Mode-0 rising edge; the flash may begin changing it on the
+following falling edge.
 
 At startup and reset, the controller is idle and deselected: SCLK and MOSI are
 low, chip select is high, and `HasResult()` is false. The first received byte is

@@ -1,6 +1,6 @@
 [project]
 name = "Livt.IO"
-version = "1.1.0"
+version = "1.2.0"
 path = "src"
 outdir = "out"
 
@@ -8,6 +8,7 @@ outdir = "out"
 path = "tests"
 components = [
     "RamTest",
+    "DistributedRamTest",
     "UartReceiverTest",
     "UartTransmitterTest",
     "UartBaseTest",

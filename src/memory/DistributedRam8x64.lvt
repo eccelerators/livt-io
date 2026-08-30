@@ -1,0 +1,11 @@
+namespace Livt.IO
+
+/** Compact 64 by 8-bit asynchronous-read distributed RAM. */
+@Opaque
+component DistributedRam8x64
+{
+	public write_enable: in logic
+	public address: in logic[6]
+	public write_data: in logic[8]
+	public read_data: out logic[8]
+}
