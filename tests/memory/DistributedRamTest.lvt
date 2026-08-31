@@ -30,7 +30,6 @@ component DistributedRamTest
 	{
 		state { this.ram16.address = address as logic[4] }
 		state {}
-		state {}
 		return this.ram16.read_data as int
 	}
 
@@ -48,7 +47,6 @@ component DistributedRamTest
 	{
 		state { this.ram32.address = address as logic[5] }
 		state {}
-		state {}
 		return this.ram32.read_data as int
 	}
 
@@ -65,7 +63,6 @@ component DistributedRamTest
 	fn ReadByte(address: int) byte
 	{
 		state { this.ramBytes.address = address as logic[6] }
-		state {}
 		state {}
 		return this.ramBytes.read_data as byte
 	}
