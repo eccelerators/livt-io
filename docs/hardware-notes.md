@@ -40,9 +40,17 @@ constants together and rerun the full UART tests.
   in flight.
 - Framing errors are counted until `ClearFrameErrors()` is called.
 
+`RtsCtsBufferedUart` uses the same FIFO sizes and adds active-low hardware flow
+control. Its `cts_n` input passes through a two-register synchronizer. CTS gates
+only the start of a frame, so releasing it never truncates a frame already in
+flight. The active-low `rts_n` output uses hysteresis: it is released when the
+receive FIFO reaches 56 bytes and asserted again after the count falls to 48.
+The remaining eight entries allow for peer reaction time and bytes already in
+flight.
+
 ## Synthesis Notes
 
-`LoopbackUart` is a serial loopback component that connects TX back to RX internally. It is useful for simulation and self-test patterns; external serial I/O should use `Uart`, `BufferedUart`, or the lower-level receiver/transmitter components.
+`LoopbackUart` is a serial loopback component that connects TX back to RX internally. It is useful for simulation and self-test patterns; external serial I/O should use `Uart`, `BufferedUart`, `RtsCtsUart`, or the lower-level receiver/transmitter components.
 
 ## I2C
 

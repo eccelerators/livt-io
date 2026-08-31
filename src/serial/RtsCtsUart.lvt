@@ -1,0 +1,84 @@
+namespace Livt.IO
+
+/**
+ * Application-friendly buffered UART with active-low RTS/CTS flow control.
+ */
+component RtsCtsUart
+{
+	uart: RtsCtsBufferedUart
+
+	new(rx: in logic, tx: out logic, cts_n: in logic, rts_n: out logic)
+	{
+		this.uart = new RtsCtsBufferedUart(rx, tx, cts_n, rts_n)
+	}
+
+	public fn IsDataAvailable() bool
+	{
+		return this.uart.IsDataAvailable()
+	}
+
+	public fn Receive() byte
+	{
+		return this.uart.Receive()
+	}
+
+	public fn Transmit(data: byte) bool
+	{
+		return this.uart.Transmit(data)
+	}
+
+	public fn IsBusy() bool
+	{
+		return this.uart.IsBusy()
+	}
+
+	public fn GetAvailableBytes() int
+	{
+		return this.uart.GetAvailableBytes()
+	}
+
+	public fn GetTransmitSpace() int
+	{
+		return this.uart.GetTransmitSpace()
+	}
+
+	public fn HasFrameError() bool
+	{
+		return this.uart.HasFrameError()
+	}
+
+	public fn GetFrameErrorCount() int
+	{
+		return this.uart.GetFrameErrorCount()
+	}
+
+	public fn ClearReceiveBuffer()
+	{
+		this.uart.ClearReceiveBuffer()
+	}
+
+	public fn ClearTransmitBuffer()
+	{
+		this.uart.ClearTransmitBuffer()
+	}
+
+	public fn ClearFrameErrors()
+	{
+		this.uart.ClearFrameErrors()
+	}
+
+	public fn Send(data: byte[]) bool
+	{
+		if (data.Length() > this.uart.GetTransmitSpace()) {
+			return false
+		}
+
+		for (var i = 0; i < data.Length(); i++) {
+			if (this.uart.Transmit(data[i]) == false) {
+				return false
+			}
+		}
+
+		return true
+	}
+}

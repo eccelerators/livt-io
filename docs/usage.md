@@ -80,6 +80,35 @@ component MessageExample
 `Send(data)` only queues the message when the transmit FIFO has space for every
 byte.
 
+## RTS/CTS Buffered Send
+
+Use `RtsCtsUart` when the board exposes conventional active-low hardware flow
+control pins:
+
+```livt
+using Livt.IO
+
+component FlowControlledSerialExample
+{
+    uart: RtsCtsUart
+
+    new(rx: in logic, tx: out logic, cts_n: in logic, rts_n: out logic)
+    {
+        this.uart = new RtsCtsUart(rx, tx, cts_n, rts_n)
+    }
+
+    public fn SendMessage(data: byte[]) bool
+    {
+        return this.uart.Send(data)
+    }
+}
+```
+
+The transmitter starts a queued frame only while `cts_n` is low. Releasing CTS
+during a frame does not corrupt that frame; transmission pauses before the next
+one. The UART drives `rts_n` high before its receive FIFO fills and drives it low
+again after enough data has been consumed.
+
 ## Loopback Serial
 
 ```livt

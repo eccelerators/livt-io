@@ -1,0 +1,110 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component RtsCtsBufferedUartTest
+{
+	controller: RtsCtsBufferedUart
+
+	rx: logic = 0b1
+	tx: logic
+	cts_n: logic = 0b1
+	rts_n: logic
+
+	loopback: RtsCtsBufferedUart
+	loopback_line: logic = 0b1
+	loopback_cts_n: logic = 0b1
+	loopback_rts_n: logic
+
+	new()
+	{
+		this.controller = new RtsCtsBufferedUart(
+			this.rx,
+			this.tx,
+			this.cts_n,
+			this.rts_n
+		)
+
+		this.loopback = new RtsCtsBufferedUart(
+			this.loopback_line,
+			this.loopback_line,
+			this.loopback_cts_n,
+			this.loopback_rts_n
+		)
+	}
+
+	@Test
+	fn TestCtsPausesAndResumesQueuedFrames()
+	{
+		this.loopback.ClearReceiveBuffer()
+		this.loopback.ClearTransmitBuffer()
+		this.loopback_cts_n = 0b1
+
+		assert this.loopback.Transmit(0x12) == true
+		assert this.loopback.Transmit(0x34) == true
+
+		Simulation.Wait(100)
+		assert this.loopback.IsBusy() == false
+		assert this.loopback.GetTransmitSpace() == RtsCtsBufferedUart.BUFFER_SIZE - 2
+		assert this.loopback.IsDataAvailable() == false
+
+		// Permit the first frame, then release CTS while it is in flight.
+		this.loopback_cts_n = 0b0
+		Simulation.Wait(100)
+		assert this.loopback.IsBusy() == true
+		this.loopback_cts_n = 0b1
+
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
+		assert this.loopback.IsBusy() == false
+		assert this.loopback.GetTransmitSpace() == RtsCtsBufferedUart.BUFFER_SIZE - 1
+		assert this.loopback.GetAvailableBytes() == 1
+		assert this.loopback.Receive() == 0x12
+
+		// Reasserting CTS resumes with the retained second frame.
+		this.loopback_cts_n = 0b0
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
+		assert this.loopback.GetTransmitSpace() == RtsCtsBufferedUart.BUFFER_SIZE
+		assert this.loopback.GetAvailableBytes() == 1
+		assert this.loopback.Receive() == 0x34
+	}
+
+	@Test
+	fn TestRtsUsesStopAndResumeWatermarks()
+	{
+		this.controller.ClearReceiveBuffer()
+		this.rx = 0b1
+		Simulation.Wait(100)
+		assert this.rts_n == 0b0
+
+		// Fill to the stop watermark using valid zero-valued UART frames.
+		for (var i = 0; i < RtsCtsBufferedUart.RTS_STOP_LEVEL; i = i + 1) {
+			this.rx = 0b0
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+
+			for (var bit = 0; bit < 8; bit = bit + 1) {
+				this.rx = 0b0
+				Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+			}
+
+			this.rx = 0b1
+			Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+		}
+
+		assert this.controller.GetAvailableBytes() == RtsCtsBufferedUart.RTS_STOP_LEVEL
+		assert this.rts_n == 0b1
+
+		// RTS remains released until the lower resume watermark is reached.
+		for (var i = RtsCtsBufferedUart.RTS_STOP_LEVEL; i > RtsCtsBufferedUart.RTS_RESUME_LEVEL + 1; i = i - 1) {
+			this.controller.Receive()
+		}
+		Simulation.Wait(10)
+		assert this.controller.GetAvailableBytes() == RtsCtsBufferedUart.RTS_RESUME_LEVEL + 1
+		assert this.rts_n == 0b1
+
+		this.controller.Receive()
+		Simulation.Wait(10)
+		assert this.controller.GetAvailableBytes() == RtsCtsBufferedUart.RTS_RESUME_LEVEL
+		assert this.rts_n == 0b0
+	}
+}

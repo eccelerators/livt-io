@@ -18,6 +18,8 @@ The 1.1.0 package surface is intentionally small and hardware-oriented:
 - `Livt.IO.UartBase`: low-level combined RX/TX UART block with explicit signals.
 - `Livt.IO.BufferedUart`: UART controller with 64-byte TX/RX FIFOs.
 - `Livt.IO.Uart`: application-friendly buffered UART wrapper.
+- `Livt.IO.RtsCtsBufferedUart`: buffered UART with active-low RTS/CTS flow control.
+- `Livt.IO.RtsCtsUart`: application-friendly RTS/CTS UART wrapper.
 - `Livt.IO.LoopbackUart`: serial loopback wrapper that connects TX to RX.
 - `Livt.IO.I2CBus`: open-drain I2C bus contract.
 - `Livt.IO.I2COpenDrainPins`: adapter from physical `inout` pins to `I2CBus`.
@@ -58,6 +60,8 @@ call sites. Protocol components use readable prefixes such as `I2CMaster` and
 | `UartBase` | Yes | Combined RX/TX block with explicit handshake signals |
 | `BufferedUart` | Yes | UART with 64-byte transmit and receive FIFOs |
 | `Uart` | Yes | Application-facing wrapper around `BufferedUart` |
+| `RtsCtsBufferedUart` | Yes | Buffered UART with active-low RTS/CTS flow control |
+| `RtsCtsUart` | Yes | Application-facing wrapper around `RtsCtsBufferedUart` |
 | `LoopbackUart` | Yes | Buffered UART wrapper with internal TX-to-RX loopback |
 | `I2CBus` | Yes | Open-drain I2C bus interface |
 | `I2COpenDrainPins` | Yes | Physical `scl`/`sda` pin adapter |
@@ -116,6 +120,13 @@ flight, and pulses `tx_done` when transmission completes.
 
 `Uart.Send(data)` is all-or-nothing: it queues the complete byte array only when
 enough transmit space is available.
+
+`RtsCtsBufferedUart` and `RtsCtsUart` add conventional active-low hardware flow
+control without adding logic to the existing UART components. `cts_n = 0`
+allows a new frame to start; releasing CTS pauses before the next frame without
+truncating one already in flight. `rts_n = 0` tells the peer that receive space
+is available. RTS is released at 56 queued bytes and asserted again after the
+FIFO drains to 48 bytes, reserving eight entries for bytes already in flight.
 
 ### I2C
 

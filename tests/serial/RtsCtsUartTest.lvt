@@ -1,0 +1,41 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+component RtsCtsUartTest
+{
+	uart: RtsCtsUart
+
+	loopback_line: logic = 0b1
+	cts_n: logic = 0b1
+	rts_n: logic
+
+	new()
+	{
+		this.uart = new RtsCtsUart(
+			this.loopback_line,
+			this.loopback_line,
+			this.cts_n,
+			this.rts_n
+		)
+	}
+
+	@Test
+	fn TestSendWaitsForCts()
+	{
+		var message = "Hi".Encode()
+		assert this.uart.Send(message) == true
+
+		Simulation.Wait(100)
+		assert this.uart.IsBusy() == false
+		assert this.uart.IsDataAvailable() == false
+
+		this.cts_n = 0b0
+		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 25)
+
+		assert this.uart.GetAvailableBytes() == 2
+		assert this.uart.Receive() == 0x48
+		assert this.uart.Receive() == 0x69
+	}
+}
