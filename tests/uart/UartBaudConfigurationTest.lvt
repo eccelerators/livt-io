@@ -1,0 +1,107 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Checks non-default baud forwarding through each application-facing wrapper.
+ */
+@Test
+@Context(ClockFrequency=25MHz)
+component UartBaudConfigurationTest
+{
+	const BAUD: Frequency = 1MHz
+	uart: BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>
+	buffered: BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>
+	flow: RtsCtsBufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, (500000Hz + 500000Hz)>
+	flowBuffered: RtsCtsBufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>
+	loopback: LoopbackUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>
+	uartLine: logic
+	bufferedLine: logic
+	flowLine: logic
+	flowBufferedLine: logic
+	cts: logic
+	rts: logic
+	bufferedRts: logic
+
+	/**
+	 * Exercises named constants, positional arguments and folded frequencies.
+	 */
+	new()
+	{
+		this.uart = new BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>(this.uartLine, this.uartLine)
+		this.buffered = new BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>(this.bufferedLine, this.bufferedLine)
+		this.flow = new RtsCtsBufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, (500000Hz + 500000Hz)>(this.flowLine, this.flowLine, this.cts, this.rts)
+		this.flowBuffered = new RtsCtsBufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>(this.flowBufferedLine, this.flowBufferedLine, this.cts, this.bufferedRts)
+		this.loopback = new LoopbackUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>()
+	}
+
+	/**
+	 * Completes a 250-cycle frame well before a default-baud frame could finish.
+	 */
+	@Test
+	fn TestNamedBufferedUartBaud()
+	{
+		assert this.uart.TryTransmit(0x55) == true
+		Simulation.Wait(500)
+		assert this.uart.GetReceiveCount() > 0
+		var receivedByte1: byte
+		assert this.uart.TryReceive(receivedByte1) == true
+		assert receivedByte1 == 0x55
+	}
+
+	/**
+	 * Verifies positional baud forwarding in the buffered component.
+	 */
+	@Test
+	fn TestBufferedUart()
+	{
+		assert this.buffered.TryTransmit(0xA3) == true
+		Simulation.Wait(500)
+		assert this.buffered.GetReceiveCount() > 0
+		var receivedByte2: byte
+		assert this.buffered.TryReceive(receivedByte2) == true
+		assert receivedByte2 == 0xA3
+	}
+
+	/**
+	 * Verifies a folded constant frequency and synchronized CTS permission.
+	 */
+	@Test
+	fn TestFoldedRtsCtsBufferedUartBaud()
+	{
+		assert this.flow.TryTransmit(0x55) == true
+		Simulation.Wait(500)
+		assert this.flow.GetReceiveCount() > 0
+		var receivedByte3: byte
+		assert this.flow.TryReceive(receivedByte3) == true
+		assert receivedByte3 == 0x55
+	}
+
+	/**
+	 * Verifies direct flow-controlled buffered construction.
+	 */
+	@Test
+	fn TestRtsCtsBufferedUart()
+	{
+		assert this.flowBuffered.TryTransmit(0xA3) == true
+		Simulation.Wait(500)
+		assert this.flowBuffered.GetReceiveCount() > 0
+		var receivedByte4: byte
+		assert this.flowBuffered.TryReceive(receivedByte4) == true
+		assert receivedByte4 == 0xA3
+	}
+
+	/**
+	 * Verifies configurable internal loopback construction.
+	 */
+	@Test
+	fn TestLoopbackUart()
+	{
+		assert this.loopback.TryTransmit(0x55) == true
+		Simulation.Wait(500)
+		assert this.loopback.GetReceiveCount() > 0
+		var receivedByte5: byte
+		assert this.loopback.TryReceive(receivedByte5) == true
+		assert receivedByte5 == 0x55
+	}
+}

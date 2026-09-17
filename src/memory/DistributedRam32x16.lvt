@@ -11,6 +11,7 @@ namespace Livt.IO
 @Opaque
 component DistributedRam32x16
 {
+	// Single-port address and payload; reads are asynchronous, writes clocked.
 	public write_enable: in logic
 	public address: in logic[4]
 	public write_data: in logic[32]

@@ -1,200 +1,280 @@
 namespace Livt.IO
 
+using Livt.Collections
+
 /**
- * BufferedUart - High-level UART controller with FIFO buffers
- *
- * Provides a software-friendly interface to the UartBase hardware component
- * with automatic buffering for both transmit and receive operations.
- *
- * Features:
- * - 64-byte transmit FIFO queue
- * - 64-byte receive FIFO queue
- * - Automatic transmission management
- * - Status queries for buffer states
+ * FIFO-backed application UART. The owner of each FIFO is its only mutator.
+ * Launch permission gates a new frame, never an active or committed frame.
  */
-component BufferedUart
+component BufferedUart<
+	RX_CAPACITY: int = 64,
+	TX_CAPACITY: int = 64,
+	DATA_BITS: UartDataBits = UartDataBits.Eight,
+	PARITY: UartParity = UartParity.None,
+	STOP_BITS: UartStopBits = UartStopBits.One,
+	BAUD: Frequency = 115200Hz
+> : IBufferedUart
 {
-	public const BUFFER_SIZE: int = 64
+	// Signal-level UART and the two independently owned byte stores.
+	uart: Uart<DATA_BITS, PARITY, STOP_BITS, BAUD>
+	receiver: Fifo<byte, RX_CAPACITY>
+	transmitter: Fifo<byte, TX_CAPACITY>
+	launchPermission: bool
 
-	uart: UartBase
+	// Scheduled transmit and receive transactions with captured results.
+	txRequest: bool
+	txCompleted: bool
+	txAccepted: bool
+	txPayload: byte
+	rxRequest: bool
+	rxCompleted: bool
+	rxAccepted: bool
+	rxResult: byte
 
-	// Transmit queue - array of 64 bytes (64 elements, each 8 bits wide)
-	tx_queue: logic[64, 8]
-	tx_head: int
-	tx_tail: int
-	tx_count: int
+	// Independently serialized clear transactions.
+	txClearRequest: bool
+	txClearCompleted: bool
+	rxClearRequest: bool
+	rxClearCompleted: bool
 
-	// Receive queue - array of 64 bytes (64 elements, each 8 bits wide)
-	rx_queue: logic[64, 8]
-	rx_head: int
-	rx_tail: int
-	rx_count: int
+	// Combinational requests presented to the two FIFO owners.
+	txClear: bool
+	rxClear: bool
+	txPush: bool
+	txPop: bool
+	rxPush: bool
+	rxPop: bool
 
-	frame_error_count: int
+	// FIFO acceptance, payload and occupancy observations.
+	txPushAccepted: bool
+	txPopAccepted: bool
+	rxPushAccepted: bool
+	rxPopAccepted: bool
+	txHead: byte
+	rxHead: byte
+	rxPayload: byte
+	txCount: int
+	txSpace: int
+	rxCount: int
+	public receiveCount: out int
+	rxSpace: int
 
-	// Internal signals for UartBase
-	tx_dv: logic
-	tx_byte: logic[8]
-	tx_active: logic
-	tx_done: logic
-	rx_dv: logic
-	rx_byte: logic[8]
-	rx_frame_error: logic
+	// Physical UART handshakes and committed-launch tracking.
+	txValid: logic
+	txData: logic[8]
+	txActive: logic
+	txDone: logic
+	rxValid: logic
+	rxData: logic[8]
+	rxError: logic
+	launchPending: bool
 
-	new(rx: in logic, tx: out logic)
+	// Sticky receive diagnostics and their serialized clear transaction.
+	frameErrors: int
+	overflows: int
+	errorClearRequest: bool
+	errorClearCompleted: bool
+
+	/**
+	 * Uses the inherited context. Optional launch permission must already be
+	 * synchronized; ordinary UARTs leave it at its default value of true.
+	 */
+	new(
+		rx: in logic,
+		tx: out logic,
+		launchPermission: bool = true
+	)
 	{
-		this.uart = new UartBase(
-			rx,
-			tx,
-			this.tx_dv,
-			this.tx_byte,
-			this.tx_active,
-			this.tx_done,
-			this.rx_dv,
-			this.rx_byte,
-			this.rx_frame_error
-		)
-		this.tx_head = 0
-		this.tx_tail = 0
-		this.tx_count = 0
-		this.rx_head = 0
-		this.rx_tail = 0
-		this.rx_count = 0
-		this.frame_error_count = 0
+		this.launchPermission = launchPermission
+		this.uart = new Uart<DATA_BITS, PARITY, STOP_BITS, BAUD>(rx, tx, this.txValid, this.txData,
+			this.txActive, this.txDone, this.rxValid, this.rxData, this.rxError)
+		this.receiver = new Fifo<byte, RX_CAPACITY>(this.rxClear, this.rxPush,
+			this.rxPayload, this.rxPop, this.rxPushAccepted, this.rxPopAccepted,
+			this.rxHead, this.rxCount, this.rxSpace)
+		this.transmitter = new Fifo<byte, TX_CAPACITY>(this.txClear, this.txPush,
+			this.txPayload, this.txPop, this.txPushAccepted, this.txPopAccepted,
+			this.txHead, this.txCount, this.txSpace)
 	}
 
 	/**
-	 * Queues one byte for transmission. Returns `false` if the transmit FIFO is full.
+	 * Returns acceptance into the transmit FIFO, not wire completion.
 	 */
-	public fn Transmit(data: byte) bool
+	override fn TryTransmit(data: byte) bool
 	{
-		if (this.tx_count < BUFFER_SIZE) {
-			this.tx_queue[this.tx_head] = data as logic[8]
-			this.tx_head = (this.tx_head + 1) % BUFFER_SIZE
-			this.tx_count = this.tx_count + 1
-			return true
-		} else {
-			return false // Queue full
+		txPayload = data
+		txRequest = !txRequest
+
+		while (txCompleted != txRequest) { state {} }
+
+		return txAccepted
+	}
+
+	/**
+	 * Enqueues a prefix, stopping at the first rejected byte. Other producers
+	 * may interleave; the returned count is the number accepted by this call.
+	 */
+	override fn Send(data: byte[]) int
+	{
+		var accepted = 0
+
+		for (var index = 0; index < data.Length(); index++) {
+			if (!TryTransmit(data[index])) { return accepted }
+			accepted++
+		}
+
+		return accepted
+	}
+
+	/**
+	 * Removes one received byte atomically; zero on failure is not valid data.
+	 */
+	override fn TryReceive(data: out byte) bool
+	{
+		rxRequest = !rxRequest
+
+		while (rxCompleted != rxRequest) { state {} }
+
+		data = rxResult
+		return rxAccepted
+	}
+
+	/**
+	 * Discards queued data but not a frame or byte already committed to launch.
+	 */
+	override fn ClearTransmitBuffer()
+	{
+		txClearRequest = !txClearRequest
+
+		while (txClearCompleted != txClearRequest) { state {} }
+	}
+
+	/**
+	 * Clear wins over reception and consumption at its transaction edge.
+	 */
+	override fn ClearReceiveBuffer()
+	{
+		rxClearRequest = !rxClearRequest
+
+		while (rxClearCompleted != rxClearRequest) { state {} }
+	}
+
+	/**
+	 * Reports an active physical transmit frame.
+	 */
+	override fn IsTransmitting() bool { return txActive == 0b1 }
+
+	/**
+	 * Includes queued, pending API, committed-launch and physically active work.
+	 */
+	override fn HasPendingTransmit() bool
+	{
+		return txCount > 0 || launchPending || txActive == 0b1 || txRequest != txCompleted
+	}
+
+	/**
+	 * Reports that no transmit work remains.
+	 */
+	override fn IsTransmitIdle() bool
+	{
+		return txCount == 0 && !launchPending && txActive == 0b0 && txRequest == txCompleted
+	}
+
+	/**
+	 * Returns a receive occupancy snapshot, not a reservation.
+	 */
+	override fn GetReceiveCount() int { return rxCount }
+
+	/**
+	 * Returns a transmit free-space snapshot, not a reservation.
+	 */
+	override fn GetTransmitSpace() int { return txSpace }
+
+	/**
+	 * Returns the number of invalid parity or stop bits observed since error clear.
+	 */
+	override fn GetFrameErrorCount() int { return frameErrors }
+
+	/**
+	 * Returns valid received frames rejected because the FIFO was full.
+	 */
+	override fn GetReceiveOverflowCount() int { return overflows }
+
+	/**
+	 * Clears both error counters; clear wins over events on its edge.
+	 */
+	override fn ClearErrors()
+	{
+		errorClearRequest = !errorClearRequest
+
+		while (errorClearCompleted != errorClearRequest) { state {} }
+	}
+
+	/**
+	 * Presents combinational FIFO requests; clear suppresses other operations.
+	 */
+	process Requests[]()
+	{
+		this.receiveCount = rxCount
+		txClear = txClearRequest != txClearCompleted
+		rxClear = rxClearRequest != rxClearCompleted
+		txPush = !txClear && txRequest != txCompleted
+		rxPop = !rxClear && rxRequest != rxCompleted
+		rxPush = !rxClear && rxValid == 0b1
+		rxPayload = rxData as byte
+		txPop = !txClear && launchPermission && !launchPending && txActive == 0b0 && txCount > 0
+	}
+
+	/**
+	 * Captures API outcomes and launch bytes exactly at the FIFO transfer edge.
+	 */
+	process Transfers()
+	{
+		state Tick {
+			if (txClear) {
+				txClearCompleted = txClearRequest
+			} elif (txPush) {
+				txAccepted = txPushAccepted
+				txCompleted = txRequest
+			}
+
+			if (rxClear) {
+				rxClearCompleted = rxClearRequest
+			} elif (rxPop) {
+				rxAccepted = rxPopAccepted
+				rxResult = rxHead
+				rxCompleted = rxRequest
+			}
+
+			txValid = 0b0
+
+			if (txPopAccepted) {
+				txData = txHead as logic[8]
+				txValid = 0b1
+				launchPending = true
+			} elif (txActive == 0b1) {
+				launchPending = false
+			}
+
+			goto Tick
 		}
 	}
 
 	/**
-	 * Removes and returns the oldest received byte. Returns `0x00` when the receive FIFO is empty.
+	 * Owns both counters; rejected reception during explicit clear is intentional.
 	 */
-	public fn Receive() byte
+	process Errors()
 	{
-		if (this.rx_count > 0) {
-			var data: byte = this.rx_queue[this.rx_tail] as byte
-			this.rx_tail = (this.rx_tail + 1) % BUFFER_SIZE
-			this.rx_count = this.rx_count - 1
-			return data
-		} else {
-			return 0x00 // No data available
-		}
-	}
+		state Tick {
+			if (errorClearRequest != errorClearCompleted) {
+				frameErrors = 0
+				overflows = 0
+				errorClearCompleted = errorClearRequest
+			} else {
+				if (rxError == 0b1) { frameErrors++ }
+				if (rxPush && !rxPushAccepted) { overflows++ }
+			}
 
-	/**
-	 * Returns `true` when at least one received byte is available.
-	 */
-	public fn IsDataAvailable() bool
-	{
-		return this.rx_count > 0
-	}
-
-	/**
-	 * Returns `true` while the underlying transmitter is actively sending a frame.
-	 */
-	public fn IsBusy() bool
-	{
-		return this.tx_active as bool
-	}
-
-	/**
-	 * Returns the number of bytes currently stored in the receive FIFO.
-	 */
-	public fn GetAvailableBytes() int
-	{
-		return this.rx_count
-	}
-
-	/**
-	 * Returns the remaining free capacity in the transmit FIFO.
-	 */
-	public fn GetTransmitSpace() int
-	{
-		return BUFFER_SIZE - this.tx_count
-	}
-
-	/**
-	 * Returns `true` when one or more framing errors have been recorded.
-	 */
-	public fn HasFrameError() bool
-	{
-		return this.frame_error_count > 0
-	}
-
-	/**
-	 * Returns the number of framing errors recorded since the last clear.
-	 */
-	public fn GetFrameErrorCount() int
-	{
-		return this.frame_error_count
-	}
-
-	/**
-	 * Removes all pending bytes from the receive FIFO.
-	 */
-	public fn ClearReceiveBuffer()
-	{
-		this.rx_head = 0
-		this.rx_tail = 0
-		this.rx_count = 0
-	}
-
-	/**
-	 * Removes all queued bytes from the transmit FIFO. A frame already in flight is unaffected.
-	 */
-	public fn ClearTransmitBuffer()
-	{
-		this.tx_head = 0
-		this.tx_tail = 0
-		this.tx_count = 0
-	}
-
-	/**
-	 * Clears the accumulated framing-error count.
-	 */
-	public fn ClearFrameErrors()
-	{
-		this.frame_error_count = 0
-	}
-
-	process HandleTransmitQueue()
-	{
-		if (this.tx_active == 0 && this.tx_count > 0) {
-			// Start transmitting next byte
-			this.tx_byte = this.tx_queue[this.tx_tail]
-			this.tx_tail = (this.tx_tail + 1) % BUFFER_SIZE
-			this.tx_count = this.tx_count - 1
-			this.tx_dv = 0b1
-			this.tx_dv = 0b0
-		}
-	}
-
-	process HandleReceiveQueue()
-	{
-		if (this.rx_dv == 0b1 && this.rx_count < BUFFER_SIZE) {
-			// Frames received while the FIFO is full are dropped.
-			this.rx_queue[this.rx_head] = this.rx_byte
-			this.rx_head = (this.rx_head + 1) % BUFFER_SIZE
-			this.rx_count = this.rx_count + 1
-		}
-	}
-
-	process CountFrameErrors()
-	{
-		if (this.rx_frame_error == 0b1) {
-			this.frame_error_count = this.frame_error_count + 1
+			goto Tick
 		}
 	}
 }

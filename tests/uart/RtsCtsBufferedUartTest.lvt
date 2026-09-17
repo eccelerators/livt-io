@@ -3,35 +3,37 @@ namespace Livt.IO.Tests
 using Livt.IO
 
 @Test
+@Context(ClockFrequency=100MHz)
 component RtsCtsBufferedUartTest
 {
-	controller: RtsCtsBufferedUart
+	// Independent default-baud timing tolerates scheduled serial-stimulus overhead.
+	const TICKS_PER_BIT: int = 868
+
+	controller: RtsCtsBufferedUart<3, 3>
 
 	rx: logic = 0b1
 	tx: logic
 	cts_n: logic = 0b1
 	rts_n: logic
 
-	loopback: RtsCtsBufferedUart
+	loopback: RtsCtsBufferedUart<3, 3>
 	loopback_line: logic = 0b1
 	loopback_cts_n: logic = 0b1
 	loopback_rts_n: logic
 
 	new()
 	{
-		this.controller = new RtsCtsBufferedUart(
+		this.controller = new RtsCtsBufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 115200Hz>(
 			this.rx,
 			this.tx,
 			this.cts_n,
-			this.rts_n
-		)
+			this.rts_n)
 
-		this.loopback = new RtsCtsBufferedUart(
+		this.loopback = new RtsCtsBufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 115200Hz>(
 			this.loopback_line,
 			this.loopback_line,
 			this.loopback_cts_n,
-			this.loopback_rts_n
-		)
+			this.loopback_rts_n)
 	}
 
 	@Test
@@ -41,32 +43,36 @@ component RtsCtsBufferedUartTest
 		this.loopback.ClearTransmitBuffer()
 		this.loopback_cts_n = 0b1
 
-		assert this.loopback.Transmit(0x12) == true
-		assert this.loopback.Transmit(0x34) == true
+		assert this.loopback.TryTransmit(0x12) == true
+		assert this.loopback.TryTransmit(0x34) == true
 
 		Simulation.Wait(100)
-		assert this.loopback.IsBusy() == false
-		assert this.loopback.GetTransmitSpace() == RtsCtsBufferedUart.BUFFER_SIZE - 2
-		assert this.loopback.IsDataAvailable() == false
+		assert this.loopback.IsTransmitting() == false
+		assert this.loopback.GetTransmitSpace() == 3 - 2
+		assert this.loopback.GetReceiveCount() == 0
 
 		// Permit the first frame, then release CTS while it is in flight.
 		this.loopback_cts_n = 0b0
 		Simulation.Wait(100)
-		assert this.loopback.IsBusy() == true
+		assert this.loopback.IsTransmitting() == true
 		this.loopback_cts_n = 0b1
 
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
-		assert this.loopback.IsBusy() == false
-		assert this.loopback.GetTransmitSpace() == RtsCtsBufferedUart.BUFFER_SIZE - 1
-		assert this.loopback.GetAvailableBytes() == 1
-		assert this.loopback.Receive() == 0x12
+		Simulation.Wait(TICKS_PER_BIT * 12)
+		assert this.loopback.IsTransmitting() == false
+		assert this.loopback.GetTransmitSpace() == 3 - 1
+		assert this.loopback.GetReceiveCount() == 1
+		var receivedByte1: byte
+		assert this.loopback.TryReceive(receivedByte1) == true
+		assert receivedByte1 == 0x12
 
 		// Reasserting CTS resumes with the retained second frame.
 		this.loopback_cts_n = 0b0
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
-		assert this.loopback.GetTransmitSpace() == RtsCtsBufferedUart.BUFFER_SIZE
-		assert this.loopback.GetAvailableBytes() == 1
-		assert this.loopback.Receive() == 0x34
+		Simulation.Wait(TICKS_PER_BIT * 12)
+		assert this.loopback.GetTransmitSpace() == 3
+		assert this.loopback.GetReceiveCount() == 1
+		var receivedByte2: byte
+		assert this.loopback.TryReceive(receivedByte2) == true
+		assert receivedByte2 == 0x34
 	}
 
 	@Test
@@ -78,33 +84,35 @@ component RtsCtsBufferedUartTest
 		assert this.rts_n == 0b0
 
 		// Fill to the stop watermark using valid zero-valued UART frames.
-		for (var i = 0; i < RtsCtsBufferedUart.RTS_STOP_LEVEL; i = i + 1) {
+		for (var i = 0; i < 2; i = i + 1) {
 			this.rx = 0b0
-			Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+			Simulation.Wait(TICKS_PER_BIT)
 
 			for (var bit = 0; bit < 8; bit = bit + 1) {
 				this.rx = 0b0
-				Simulation.Wait(UartReceiver.TICKS_PER_BIT)
+				Simulation.Wait(TICKS_PER_BIT)
 			}
 
 			this.rx = 0b1
-			Simulation.Wait(UartReceiver.TICKS_PER_BIT * 2)
+			Simulation.Wait(TICKS_PER_BIT * 2)
 		}
 
-		assert this.controller.GetAvailableBytes() == RtsCtsBufferedUart.RTS_STOP_LEVEL
+		assert this.controller.GetReceiveCount() == 2
 		assert this.rts_n == 0b1
 
 		// RTS remains released until the lower resume watermark is reached.
-		for (var i = RtsCtsBufferedUart.RTS_STOP_LEVEL; i > RtsCtsBufferedUart.RTS_RESUME_LEVEL + 1; i = i - 1) {
-			this.controller.Receive()
+		for (var i = 2; i > 1 + 1; i = i - 1) {
+			var discardedByte3: byte
+			assert this.controller.TryReceive(discardedByte3) == true
 		}
 		Simulation.Wait(10)
-		assert this.controller.GetAvailableBytes() == RtsCtsBufferedUart.RTS_RESUME_LEVEL + 1
+		assert this.controller.GetReceiveCount() == 1 + 1
 		assert this.rts_n == 0b1
 
-		this.controller.Receive()
+		var discardedByte4: byte
+		assert this.controller.TryReceive(discardedByte4) == true
 		Simulation.Wait(10)
-		assert this.controller.GetAvailableBytes() == RtsCtsBufferedUart.RTS_RESUME_LEVEL
+		assert this.controller.GetReceiveCount() == 1
 		assert this.rts_n == 0b0
 	}
 }

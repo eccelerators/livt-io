@@ -1,0 +1,116 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Exercises shared mutation dispatch with simultaneous producers and consumers.
+ */
+@Test
+@Context(ClockFrequency=100MHz)
+component ConcurrentUartTest
+{
+	uart: BufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
+	wire: logic
+	firstDone: bool
+	secondDone: bool
+	consumerDone: bool
+
+	/**
+	 * Uses a small queue to force backpressure and pointer wrapping.
+	 */
+	new()
+	{
+		this.uart = new BufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>(wire, wire)
+	}
+
+	/**
+	 * Produces the first ordered byte stream.
+	 */
+	process First()
+	{
+		state Start {
+			for (var index = 0; index < 8; index++) {
+				var accepted = false
+				while (!accepted) {
+					accepted = this.uart.TryTransmit((index + 1) as byte)
+				}
+			}
+
+			firstDone = true
+			goto Done
+		}
+
+		state Done { goto Done }
+	}
+
+	/**
+	 * Produces a distinguishable second ordered stream.
+	 */
+	process Second()
+	{
+		state Start {
+			for (var index = 0; index < 8; index++) {
+				var accepted = false
+				while (!accepted) {
+					accepted = this.uart.TryTransmit((index + 129) as byte)
+				}
+			}
+
+			secondDone = true
+			goto Done
+		}
+
+		state Done { goto Done }
+	}
+
+	/**
+	 * Checks per-producer ordering, loss, duplication and failed-dequeue values.
+	 */
+	process Consumer()
+	{
+		state Start {
+			var first = 0
+			var second = 0
+
+			while (first + second < 16) {
+				var value: byte = 0xFF
+				var accepted = this.uart.TryReceive(value)
+
+				if (accepted) {
+					if (value < 0x80) {
+						first++
+						assert value == first as byte
+					} else {
+						second++
+						assert value == (second + 128) as byte
+					}
+				} else {
+					assert value == 0x00
+				}
+			}
+
+			assert first == 8
+			assert second == 8
+			consumerDone = true
+			goto Done
+		}
+
+		state Done { goto Done }
+	}
+
+	/**
+	 * Bounds completion and checks final queue state without imposing interleaving.
+	 */
+	@Test
+	fn TestConcurrentTransactions()
+	{
+		Simulation.Wait(22000)
+		assert firstDone == true
+		assert secondDone == true
+		assert consumerDone == true
+		assert this.uart.GetReceiveCount() == 0
+		assert this.uart.GetTransmitSpace() == 3
+		assert this.uart.GetReceiveOverflowCount() == 0
+		assert this.uart.IsTransmitIdle() == true
+	}
+}

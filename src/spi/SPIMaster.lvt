@@ -10,28 +10,24 @@ namespace Livt.IO
  */
 component SPIMaster
 {
+	// Command codes consumed by the transfer state machine.
 	const COMMAND_NONE: int = 0
-
 	const COMMAND_SELECT: int = 1
-
 	const COMMAND_DESELECT: int = 2
-
 	const COMMAND_TRANSFER: int = 3
 
+	// Borrowed physical signal contract.
 	bus: SPIBus
 
+	// Selection, command completion, and the retained receive result.
 	busy: bool
-
 	selected: bool
-
 	hasResult: bool
-
 	resultByte: byte
 
+	// Pending command payload and context-derived phase timing.
 	transmitByte: byte
-
 	command: int
-
 	halfPeriodTicks: uint
 
 	/**

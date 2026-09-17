@@ -1,0 +1,122 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Checks compile-time UART data-width, parity and stop-bit specialization.
+ */
+@Test
+@Context(ClockFrequency=25MHz)
+component UartFrameConfigurationTest
+{
+	const TICKS_PER_BIT: int = 25
+	const RECEIVER_TICKS_PER_BIT: int = 250
+
+	fiveNoneTwo: LoopbackUart<64, 64, UartDataBits.Five, UartParity.None, UartStopBits.Two, 1MHz>
+	sevenEvenOne: LoopbackUart<64, 64, UartDataBits.Seven, UartParity.Even, UartStopBits.One, 1MHz>
+	eightOddTwo: LoopbackUart<64, 64, UartDataBits.Eight, UartParity.Odd, UartStopBits.Two, 1MHz>
+	receiver: UartReceiver<UartDataBits.Seven, UartParity.Even, UartStopBits.One, 100000Hz>
+	rx: logic
+	rxValid: logic
+	rxData: logic[8]
+	rxError: logic
+
+	/**
+	 * Builds representative formats at a short simulation baud rate.
+	 */
+	new()
+	{
+		this.rx = 0b1
+		this.fiveNoneTwo = new LoopbackUart<64, 64, UartDataBits.Five, UartParity.None, UartStopBits.Two, 1MHz>()
+		this.sevenEvenOne = new LoopbackUart<64, 64, UartDataBits.Seven, UartParity.Even, UartStopBits.One, 1MHz>()
+		this.eightOddTwo = new LoopbackUart<64, 64, UartDataBits.Eight, UartParity.Odd, UartStopBits.Two, 1MHz>()
+		this.receiver = new UartReceiver<UartDataBits.Seven, UartParity.Even, UartStopBits.One, 100000Hz>(
+			this.rx, this.rxValid, this.rxData, this.rxError)
+	}
+
+	/**
+	 * Verifies that five-bit frames carry only the five least-significant bits.
+	 */
+	@Test
+	fn TestFiveDataBitsNoParityTwoStops()
+	{
+		assert this.fiveNoneTwo.TryTransmit(0xFF) == true
+		Simulation.Wait(TICKS_PER_BIT * 12)
+
+		var received: byte
+		assert this.fiveNoneTwo.TryReceive(received) == true
+		assert received == 0x1F
+	}
+
+	/**
+	 * Verifies seven data bits with even parity and one stop bit.
+	 */
+	@Test
+	fn TestSevenDataBitsEvenParityOneStop()
+	{
+		assert this.sevenEvenOne.TryTransmit(0xD5) == true
+		Simulation.Wait(TICKS_PER_BIT * 14)
+
+		var received: byte
+		assert this.sevenEvenOne.TryReceive(received) == true
+		assert received == 0x55
+	}
+
+	/**
+	 * Verifies full-width odd parity with two stop bits.
+	 */
+	@Test
+	fn TestEightDataBitsOddParityTwoStops()
+	{
+		assert this.eightOddTwo.TryTransmit(0xA6) == true
+		Simulation.Wait(TICKS_PER_BIT * 16)
+
+		var received: byte
+		assert this.eightOddTwo.TryReceive(received) == true
+		assert received == 0xA6
+	}
+
+	/**
+	 * Independently checks that a wrong even-parity bit rejects the frame.
+	 */
+	@Test
+	fn TestWrongParityRaisesFrameError()
+	{
+		this.rx = 0b1
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT * 2)
+
+		this.rx = 0b0 // Start bit
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT)
+
+		// 0x55 in seven bits, least-significant bit first: 1,0,1,0,1,0,1.
+		this.rx = 0b1
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT)
+		this.rx = 0b0
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT)
+		this.rx = 0b1
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT)
+		this.rx = 0b0
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT)
+		this.rx = 0b1
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT)
+		this.rx = 0b0
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT)
+		this.rx = 0b1
+		Simulation.Wait(RECEIVER_TICKS_PER_BIT)
+
+		var errorSeen = 0b0
+		var validSeen = 0b0
+
+		// The wrong parity bit is high; leaving the line high also supplies the stop bit.
+		this.rx = 0b1 // Four data ones require an even-parity zero.
+		state {
+			for (var index = 0; index < RECEIVER_TICKS_PER_BIT * 2; index++) {
+				if (this.rxError == 0b1) { errorSeen = 0b1 }
+				if (this.rxValid == 0b1) { validSeen = 0b1 }
+			}
+		}
+
+		assert errorSeen == 0b1
+		assert validSeen == 0b0
+	}
+}

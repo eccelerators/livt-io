@@ -1,0 +1,31 @@
+namespace Livt.IO
+
+/**
+ * Number of least-significant application-data bits carried by each UART frame.
+ */
+enum UartDataBits
+{
+	Five
+	Six
+	Seven
+	Eight
+}
+
+/**
+ * Optional parity bit generated and checked after the application-data bits.
+ */
+enum UartParity
+{
+	None
+	Even
+	Odd
+}
+
+/**
+ * Number of idle-high stop bits required at the end of each UART frame.
+ */
+enum UartStopBits
+{
+	One
+	Two
+}

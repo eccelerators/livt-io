@@ -9,8 +9,11 @@ namespace Livt.IO
  */
 interface I2CBus
 {
+	// Observed line levels supplied by the bus provider.
 	scl: out logic
 	sda: out logic
+
+	// Device requests: one pulls the line low, zero releases it.
 	scl_drive_low: in logic
 	sda_drive_low: in logic
 }

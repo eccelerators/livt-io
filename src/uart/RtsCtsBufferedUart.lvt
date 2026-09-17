@@ -1,199 +1,83 @@
 namespace Livt.IO
 
 /**
- * Buffered UART controller with active-low RTS/CTS hardware flow control.
- *
- * CTS is synchronized before it gates the start of a frame. An active frame is
- * always completed, even when CTS is released while that frame is in flight.
- * RTS uses hysteresis so the peer has room to stop before the receive FIFO
- * fills and does not repeatedly toggle around a single threshold.
+ * Active-low RTS/CTS UART with compile-time receive and transmit capacities.
+ * Scheduled methods report transaction results; they are not single-cycle ports.
  */
-component RtsCtsBufferedUart
+component RtsCtsBufferedUart<
+	RX_CAPACITY: int = 64,
+	TX_CAPACITY: int = 64,
+	DATA_BITS: UartDataBits = UartDataBits.Eight,
+	PARITY: UartParity = UartParity.None,
+	STOP_BITS: UartStopBits = UartStopBits.One,
+	BAUD: Frequency = 115200Hz
+> : IBufferedUart by buffered
 {
-	public const BUFFER_SIZE: int = 64
+	// Reserve at least one receive slot; small FIFOs require prompt peer response.
+	const RTS_HEADROOM: int = (RX_CAPACITY + 7) / 8
+	const RTS_STOP_LEVEL: int = RX_CAPACITY - RTS_HEADROOM
+	const RTS_RESUME_LEVEL: int = RTS_STOP_LEVEL - RTS_HEADROOM
+	static assert RX_CAPACITY >= 2, "RTS/CTS receive capacity must be at least two"
 
-	public const RTS_STOP_LEVEL: int = 56
+	// Scheduled UART implementation delegated through the common contract.
+	buffered: BufferedUart<RX_CAPACITY, TX_CAPACITY, DATA_BITS, PARITY, STOP_BITS, BAUD>
 
-	public const RTS_RESUME_LEVEL: int = 48
+	// Asynchronous CTS input and its two-stage synchronized representation.
+	ctsN: logic
+	ctsMeta: logic
+	ctsSync: logic
+	permission: bool
 
-	uart: UartBase
+	// Registered RTS output and the receive occupancy used by its hysteresis.
+	rtsN: logic
+	receiveCount: int
 
-	cts_n: logic
-	cts_n_meta: logic
-	cts_n_sync: logic
-	rts_n: logic
-
-	tx_queue: logic[64, 8]
-	tx_head: int
-	tx_tail: int
-	tx_count: int
-
-	rx_queue: logic[64, 8]
-	rx_head: int
-	rx_tail: int
-	rx_count: int
-
-	frame_error_count: int
-
-	tx_dv: logic
-	tx_byte: logic[8]
-	tx_active: logic
-	tx_done: logic
-	rx_dv: logic
-	rx_byte: logic[8]
-	rx_frame_error: logic
-
-	new(rx: in logic, tx: out logic, cts_n: in logic, rts_n: out logic)
+	/**
+	 * Inherits clock/reset from the selected context and specializes the baud rate.
+	 */
+	new(rx: in logic, tx: out logic, ctsN: in logic, rtsN: out logic)
 	{
-		this.cts_n = cts_n
-		this.cts_n_meta = 0b1
-		this.cts_n_sync = 0b1
-		this.rts_n = 0b0
-		rts_n = this.rts_n
-
-		this.uart = new UartBase(
-			rx,
-			tx,
-			this.tx_dv,
-			this.tx_byte,
-			this.tx_active,
-			this.tx_done,
-			this.rx_dv,
-			this.rx_byte,
-			this.rx_frame_error
-		)
-		this.tx_head = 0
-		this.tx_tail = 0
-		this.tx_count = 0
-		this.rx_head = 0
-		this.rx_tail = 0
-		this.rx_count = 0
-		this.frame_error_count = 0
+		this.ctsN = ctsN
+		this.ctsMeta = 0b1
+		this.ctsSync = 0b1
+		rtsN = this.rtsN
+		this.buffered = new BufferedUart<RX_CAPACITY, TX_CAPACITY, DATA_BITS, PARITY, STOP_BITS, BAUD>(
+			rx, tx, launchPermission = permission)
 	}
 
 	/**
-	 * Queues one byte for transmission. Returns `false` if the transmit FIFO is full.
+	 * Two clocked stages synchronize active-low CTS before launch permission.
 	 */
-	public fn Transmit(data: byte) bool
-	{
-		if (this.tx_count < BUFFER_SIZE) {
-			this.tx_queue[this.tx_head] = data as logic[8]
-			this.tx_head = (this.tx_head + 1) % BUFFER_SIZE
-			this.tx_count = this.tx_count + 1
-			return true
-		} else {
-			return false
-		}
-	}
-
-	/**
-	 * Removes and returns the oldest received byte. Returns `0x00` when empty.
-	 */
-	public fn Receive() byte
-	{
-		if (this.rx_count > 0) {
-			var data: byte = this.rx_queue[this.rx_tail] as byte
-			this.rx_tail = (this.rx_tail + 1) % BUFFER_SIZE
-			this.rx_count = this.rx_count - 1
-			return data
-		} else {
-			return 0x00
-		}
-	}
-
-	public fn IsDataAvailable() bool
-	{
-		return this.rx_count > 0
-	}
-
-	public fn IsBusy() bool
-	{
-		return this.tx_active as bool
-	}
-
-	public fn GetAvailableBytes() int
-	{
-		return this.rx_count
-	}
-
-	public fn GetTransmitSpace() int
-	{
-		return BUFFER_SIZE - this.tx_count
-	}
-
-	public fn HasFrameError() bool
-	{
-		return this.frame_error_count > 0
-	}
-
-	public fn GetFrameErrorCount() int
-	{
-		return this.frame_error_count
-	}
-
-	public fn ClearReceiveBuffer()
-	{
-		this.rx_head = 0
-		this.rx_tail = 0
-		this.rx_count = 0
-	}
-
-	public fn ClearTransmitBuffer()
-	{
-		this.tx_head = 0
-		this.tx_tail = 0
-		this.tx_count = 0
-	}
-
-	public fn ClearFrameErrors()
-	{
-		this.frame_error_count = 0
-	}
-
-	// CTS is asynchronous to the component clock and must not directly gate the transmitter.
 	process SynchronizeCts()
 	{
-		state {
-			this.cts_n_meta = this.cts_n
-			this.cts_n_sync = this.cts_n_meta
+		state Tick {
+			ctsSync = ctsMeta
+			ctsMeta = ctsN
+			goto Tick
 		}
 	}
 
-	process HandleTransmitQueue()
+	/**
+	 * Read the FIFO occupancy without a scheduled status call.
+	 */
+	process Status[]()
 	{
-		if (this.tx_active == 0 && this.tx_count > 0 && this.cts_n_sync == 0b0) {
-			this.tx_byte = this.tx_queue[this.tx_tail]
-			this.tx_tail = (this.tx_tail + 1) % BUFFER_SIZE
-			this.tx_count = this.tx_count - 1
-			this.tx_dv = 0b1
-			this.tx_dv = 0b0
-		}
+		permission = ctsSync == 0b0
+		receiveCount = this.buffered.receiveCount
 	}
 
-	process HandleReceiveQueue()
-	{
-		if (this.rx_dv == 0b1 && this.rx_count < BUFFER_SIZE) {
-			this.rx_queue[this.rx_head] = this.rx_byte
-			this.rx_head = (this.rx_head + 1) % BUFFER_SIZE
-			this.rx_count = this.rx_count + 1
-		}
-	}
-
+	/**
+	 * Stop with reserved headroom and resume only below the lower watermark.
+	 */
 	process UpdateRts()
 	{
-		if (this.rx_count >= RTS_STOP_LEVEL) {
-			this.rts_n = 0b1
-		} else {
-			if (this.rx_count <= RTS_RESUME_LEVEL) {
-				this.rts_n = 0b0
+		state Tick {
+			if (receiveCount >= RTS_STOP_LEVEL) {
+				rtsN = 0b1
+			} elif (receiveCount <= RTS_RESUME_LEVEL) {
+				rtsN = 0b0
 			}
-		}
-	}
-
-	process CountFrameErrors()
-	{
-		if (this.rx_frame_error == 0b1) {
-			this.frame_error_count = this.frame_error_count + 1
+			goto Tick
 		}
 	}
 }

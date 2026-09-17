@@ -8,10 +8,12 @@ namespace Livt.IO
  */
 component Ram
 {
+	// Fixed address geometry of the owned memory primitive.
 	public const ADDRESS_WIDTH: int = 11
 	public const CAPACITY: int = 2048
 	public const MAX_ADDRESS: int = 2047
 
+	// Primitive storage; this wrapper adds public address-range checks.
 	ram: InternalRam
 
 	new()

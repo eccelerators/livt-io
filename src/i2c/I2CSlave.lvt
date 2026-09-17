@@ -9,29 +9,42 @@ namespace Livt.IO
  */
 component I2CSlave
 {
+	// Borrowed bus attachment and the selected seven-bit target address.
 	bus: I2CBus
 	address: byte
+
+	// Edge history and incoming address/data-bit assembly.
 	prevScl: logic
 	prevSda: logic
 	bitCount: int
 	shiftReg: byte
+
+	// Last received byte and its retained notification.
 	receivedByte: byte
 	byteReceived: bool
+
+	// Current and prefetched read payloads and the refill request.
 	transmitByte: byte
 	nextTransmitByte: byte
 	hasNextTransmitByte: bool
 	readRequested: bool
+
+	// Address selection, transfer direction, and retained address/stop events.
 	addressMatched: bool
 	isRead: bool
 	addressMatchEvent: bool
 	readAddressed: bool
 	writeAddressed: bool
 	stopDetected: bool
+
+	// Transmit completion, ACK phase tracking, and SDA drive state.
 	transmittedByte: bool
 	transmitAcked: bool
 	ackHighSeen: bool
 	ackLowSeen: bool
 	readSdaDriveLow: logic
+
+	// Startup and active-transaction tracking.
 	initialized: bool
 	busActive: bool
 

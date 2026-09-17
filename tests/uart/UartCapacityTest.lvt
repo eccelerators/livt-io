@@ -1,0 +1,74 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Checks partial sends, explicit status and RTS headroom on a small public UART.
+ */
+@Test
+@Context(ClockFrequency=100MHz)
+component UartCapacityTest
+{
+	uart: RtsCtsBufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
+	wire: logic
+	ctsN: logic = 0b1
+	rtsN: logic
+
+	/**
+	 * Uses non-power-of-two capacities and starts with transmission blocked.
+	 */
+	new()
+	{
+		this.uart = new RtsCtsBufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>(wire, wire, ctsN, rtsN)
+	}
+
+	/**
+	 * A full queue rejects the suffix without losing its accepted prefix.
+	 */
+	@Test
+	fn TestPartialSendAndWatermarks()
+	{
+		var message: byte[5] = [0x00, 0x22, 0x33, 0x44, 0x55]
+		assert this.uart.Send(message) == 3
+		assert this.uart.GetTransmitSpace() == 0
+		assert this.uart.TryTransmit(0xFF) == false
+		assert this.uart.IsTransmitting() == false
+		assert this.uart.HasPendingTransmit() == true
+		assert this.uart.IsTransmitIdle() == false
+		ctsN = 0b0
+		Simulation.Wait(4000)
+		assert this.uart.IsTransmitIdle() == true
+		assert this.uart.GetReceiveCount() == 3
+		assert rtsN == 0b1
+		var value: byte = 0xFF
+		assert this.uart.TryReceive(value) == true
+		assert value == 0x00
+		assert rtsN == 0b1
+		assert this.uart.TryReceive(value) == true
+		assert value == 0x22
+		Simulation.Wait(10)
+		assert rtsN == 0b0
+		assert this.uart.TryReceive(value) == true
+		assert value == 0x33
+		assert this.uart.TryReceive(value) == false
+		assert value == 0x00
+		assert this.uart.GetReceiveOverflowCount() == 0
+	}
+
+	/**
+	 * Clearing a blocked queue returns it to idle and retains full capacity.
+	 */
+	@Test
+	fn TestClearBlockedQueue()
+	{
+		ctsN = 0b1
+		Simulation.Wait(10)
+		assert this.uart.TryTransmit(0x66) == true
+		this.uart.ClearTransmitBuffer()
+		assert this.uart.IsTransmitIdle() == true
+		assert this.uart.GetTransmitSpace() == 3
+		ctsN = 0b0
+		Simulation.Wait(1200)
+		assert this.uart.GetReceiveCount() == 0
+	}
+}

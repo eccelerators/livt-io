@@ -5,27 +5,36 @@ namespace Livt.IO
  */
 component I2CMaster
 {
+	// Fixed standard-mode timing and supported address range.
 	public const CLOCK_HZ: int = 100000000
 	public const I2C_HZ: int = 100000
 	public const TICKS_PER_HALF_PERIOD: int = 500
 	public const MAX_7_BIT_ADDRESS: byte = 0x7F
 
+	// Command codes consumed by the byte-transfer state machine.
 	const COMMAND_NONE: int = 0
 	const COMMAND_START: int = 1
 	const COMMAND_STOP: int = 2
 	const COMMAND_WRITE: int = 3
 	const COMMAND_READ: int = 4
 
+	// Borrowed open-drain bus attachment.
 	bus: I2CBus
+
+	// Completion status and result retained for the caller.
 	busy: bool
 	hasResult: bool
 	resultAck: bool
 	resultByte: byte
+
+	// Active byte command, bit position, and phase timing.
 	currentByte: byte
 	sendAck: bool
 	bitIndex: int
 	tickCount: int
 	command: int
+
+	// Sampled bus levels used for clock stretching and input data.
 	observedScl: logic
 	observedSda: logic
 

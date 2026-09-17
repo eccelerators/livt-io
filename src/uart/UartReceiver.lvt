@@ -3,30 +3,38 @@ namespace Livt.IO
 /**
  * UartReceiver
  *
- * Receives 8-N-1 UART frames from `rx` and produces a one-cycle `rx_dv`
- * pulse when a valid byte has been decoded. If the stop bit is invalid,
- * the frame is rejected and `rx_frame_error` pulses instead.
+ * Receives compile-time-configured UART frames from `rx` and produces a
+ * one-cycle `rx_dv` pulse when a valid byte has been decoded. Invalid parity
+ * or stop bits reject the frame and pulse `rx_frame_error` instead.
  */
-component UartReceiver
+component UartReceiver<
+	DATA_BITS: UartDataBits = UartDataBits.Eight,
+	PARITY: UartParity = UartParity.None,
+	STOP_BITS: UartStopBits = UartStopBits.One,
+	BAUD: Frequency = 115200Hz
+>
 {
-	public const TICKS_PER_BIT: int = 868
+	// Compile-time bit timing and the minimum width of the bit-period counter.
+	const TICKS_PER_BIT: uint = this.context.TicksPer(BAUD)
+	const CLOCK_COUNT_BITS: int = Bits.RequiredFor(TICKS_PER_BIT - 1)
 
+	// Wire levels used to qualify frame boundaries.
 	const START_BIT: logic = 0b0
-
 	const STOP_BIT: logic = 0b1
 
+	// Asynchronous input and its two-stage synchronization before sampling.
 	rx: logic
-
 	rx_tmp: logic
-
 	rx_data: logic
 
+	// Decoded payload and mutually exclusive valid/error event pulses.
 	rx_byte: logic[8]
-
 	rx_dv: logic
-
 	rx_frame_error: logic
 
+	/**
+	 * Configures reception at a compile-time baud rate and frame format.
+	 */
 	new(rx: in logic, rx_dv: out logic, rx_byte: out logic[8], rx_frame_error: out logic)
 	{
 		this.rx = rx
@@ -60,7 +68,9 @@ component UartReceiver
 		return this.rx_frame_error
 	}
 
-	// Double-register the asynchronous input before sampling it in the receiver state machine.
+	/**
+	 * Synchronizes the asynchronous input before the receiver samples it.
+	 */
 	process DoubleRegisterData()
 	{
 		state {
@@ -69,14 +79,19 @@ component UartReceiver
 		}
 	}
 
+	/**
+	 * Samples the selected frame format and rejects invalid parity or stop bits.
+	 */
 	process Receiver()
 	{
-		var clock_count: int = 0
-		var bit_index: int = 0
+		var clock_count: logic[CLOCK_COUNT_BITS] = (0 as uint) as logic[CLOCK_COUNT_BITS]
+		var bit_index: logic[3] = 0b000
+		var parity: logic = 0b0
 
 		state Idle {
-			clock_count = 0
+			clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
 			bit_index = 0
+			parity = 0b0
 			this.rx_dv = 0
 			this.rx_frame_error = 0
 			if (this.rx_data == START_BIT) {
@@ -86,46 +101,92 @@ component UartReceiver
 			}
 		}
 		state Receiving {
-			if (clock_count == (TICKS_PER_BIT / 2)) {
+			if ((clock_count as uint) == TICKS_PER_BIT / 2) {
 				if (this.rx_data == 0) {
-					clock_count = 0
+					clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
+					this.rx_byte = 0
 					goto DataBits
 				} else {
 					goto Idle
 				}
 			} else {
-				clock_count++
+				clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
 				goto Receiving
 			}
 		}
 		state DataBits {
-			if (clock_count < TICKS_PER_BIT - 1) {
-				clock_count++
+			if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+				clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
 				goto DataBits
 			} else {
-				clock_count = 0
-				this.rx_byte[bit_index] = this.rx_data
-				if (bit_index < 7) {
-					bit_index++
-					goto DataBits
+				clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
+				this.rx_byte[bit_index as uint] = this.rx_data
+				static if (PARITY != UartParity.None) { parity = parity ^ this.rx_data }
+				static if (DATA_BITS == UartDataBits.Five) {
+					if ((bit_index as uint) < 4) { bit_index = ((bit_index as uint) + 1) as logic[3]; goto DataBits }
+					else { bit_index = 0; static if (PARITY == UartParity.None) { goto StopBit } else { goto ParityBit } }
+				} elif (DATA_BITS == UartDataBits.Six) {
+					if ((bit_index as uint) < 5) { bit_index = ((bit_index as uint) + 1) as logic[3]; goto DataBits }
+					else { bit_index = 0; static if (PARITY == UartParity.None) { goto StopBit } else { goto ParityBit } }
+				} elif (DATA_BITS == UartDataBits.Seven) {
+					if ((bit_index as uint) < 6) { bit_index = ((bit_index as uint) + 1) as logic[3]; goto DataBits }
+					else { bit_index = 0; static if (PARITY == UartParity.None) { goto StopBit } else { goto ParityBit } }
 				} else {
-					bit_index = 0
-					goto StopBit
+					if ((bit_index as uint) < 7) { bit_index = ((bit_index as uint) + 1) as logic[3]; goto DataBits }
+					else { bit_index = 0; static if (PARITY == UartParity.None) { goto StopBit } else { goto ParityBit } }
+				}
+			}
+		}
+		static if (PARITY != UartParity.None) {
+			state ParityBit {
+				if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+					clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
+					goto ParityBit
+				} else {
+					clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
+					static if (PARITY == UartParity.Even) {
+						if (this.rx_data == parity) { goto StopBit }
+						else { this.rx_frame_error = 1; goto WaitForIdle }
+					} else {
+						if (this.rx_data != parity) { goto StopBit }
+						else { this.rx_frame_error = 1; goto WaitForIdle }
+					}
 				}
 			}
 		}
 		state StopBit {
-			if (clock_count < TICKS_PER_BIT - 1) {
-				clock_count = clock_count + 1
+			if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+				clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
 				goto StopBit
 			} else {
-				clock_count = 0
+				clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
 				if (this.rx_data == STOP_BIT) {
-					this.rx_dv = 1
-					goto Cleanup
+					static if (STOP_BITS == UartStopBits.Two) {
+						goto SecondStopBit
+					} else {
+						this.rx_dv = 1
+						goto Cleanup
+					}
 				} else {
 					this.rx_frame_error = 1
 					goto WaitForIdle
+				}
+			}
+		}
+		static if (STOP_BITS == UartStopBits.Two) {
+			state SecondStopBit {
+				if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+					clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
+					goto SecondStopBit
+				} else {
+					clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
+					if (this.rx_data == STOP_BIT) {
+						this.rx_dv = 1
+						goto Cleanup
+					} else {
+						this.rx_frame_error = 1
+						goto WaitForIdle
+					}
 				}
 			}
 		}

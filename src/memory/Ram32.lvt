@@ -3,9 +3,11 @@ namespace Livt.IO
 /** 2,048-cell 32-bit RAM with registered reads and byte write enables. */
 component Ram32
 {
+	// Fixed word capacity and valid address range.
 	public const CAPACITY: int = 2048
 	public const MAX_ADDRESS: int = 2047
 
+	// Primitive storage; this wrapper adds public address-range checks.
 	ram: InternalRam32
 
 	new() { ram = new InternalRam32() }

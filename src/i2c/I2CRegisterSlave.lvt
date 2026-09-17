@@ -10,13 +10,19 @@ namespace Livt.IO
  */
 component I2CRegisterSlave
 {
+	// Register-file address space.
 	public const REGISTER_COUNT: int = 256
 
+	// Owned byte-level target and register storage.
 	slave: I2CSlave
 	registers: byte[256]
+
+	// Current register selection and first-write-byte interpretation.
 	pointer: int
 	pointerValid: bool
 	expectingPointer: bool
+
+	// Last application-visible register write and its notification.
 	writtenRegister: byte
 	writtenValue: byte
 	hasWrittenRegister: bool

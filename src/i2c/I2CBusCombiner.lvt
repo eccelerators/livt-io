@@ -5,9 +5,12 @@ namespace Livt.IO
  */
 component I2CBusCombiner
 {
+	// Upstream attachment and the two independently driven device endpoints.
 	upstream: I2CBus
 	public controller: I2CBus
 	public target: I2CBus
+
+	// Combined low-drive requests exposed for observation.
 	public scl_drive_low: logic
 	public sda_drive_low: logic
 

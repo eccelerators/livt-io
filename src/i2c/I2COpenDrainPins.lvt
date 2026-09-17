@@ -5,6 +5,7 @@ namespace Livt.IO
  */
 component I2COpenDrainPins : I2CBus
 {
+	// Physical open-drain pins; releasing a pin relies on the board pull-up.
 	public physical_scl: inout logic
 	public physical_sda: inout logic
 

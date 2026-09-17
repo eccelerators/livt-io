@@ -1,0 +1,38 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Keeps the default 64/64, 8-N-1, 115200-baud buffered configurations available
+ * to the reproducible cross-FPGA synthesis benchmark.
+ */
+@Test
+@Context(ClockFrequency=100MHz)
+component UartSynthesisConfigurationTest
+{
+	buffered: BufferedUart
+	flowControlled: RtsCtsBufferedUart
+
+	bufferedLine: logic = 0b1
+	flowControlledLine: logic = 0b1
+	ctsN: logic = 0b0
+	rtsN: logic
+
+	new()
+	{
+		this.buffered = new BufferedUart(this.bufferedLine, this.bufferedLine)
+		this.flowControlled = new RtsCtsBufferedUart(
+			this.flowControlledLine,
+			this.flowControlledLine,
+			this.ctsN,
+			this.rtsN
+		)
+	}
+
+	@Test
+	fn TestDefaultCapacities()
+	{
+		assert this.buffered.GetTransmitSpace() == 64
+		assert this.flowControlled.GetTransmitSpace() == 64
+	}
+}

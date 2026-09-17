@@ -1,0 +1,79 @@
+namespace Livt.IO
+
+/**
+ * Scheduled application-level contract for UARTs with receive and transmit
+ * storage. Implementations may differ in pins and flow control, but preserve
+ * the same acceptance, occupancy, clearing and diagnostic semantics.
+ */
+interface IBufferedUart
+{
+	/**
+	 * Attempts to enqueue one byte; success means accepted, not transmitted.
+	 */
+	fn TryTransmit(data: byte) bool
+
+	/**
+	 * Enqueues a prefix and returns the number accepted before the first rejection.
+	 * Other producers may interleave; this call does not wait for wire completion.
+	 */
+	fn Send(data: byte[]) int
+
+	/**
+	 * Atomically removes one byte; failure assigns zero and removes nothing.
+	 * A successful zero byte is valid data and is distinguished by the result.
+	 */
+	fn TryReceive(data: out byte) bool
+
+	/**
+	 * Reports a physical transmit frame in progress.
+	 */
+	fn IsTransmitting() bool
+
+	/**
+	 * Includes pending API requests, queued bytes, committed launches and active frames.
+	 */
+	fn HasPendingTransmit() bool
+
+	/**
+	 * Reports that no transmit work remains.
+	 */
+	fn IsTransmitIdle() bool
+
+	/**
+	 * Returns receive occupancy as a snapshot, not a reservation.
+	 */
+	fn GetReceiveCount() int
+
+	/**
+	 * Returns free transmit capacity as a snapshot, not a reservation.
+	 */
+	fn GetTransmitSpace() int
+
+	/**
+	 * Returns invalid parity or stop-bit events since reset or the last error clear.
+	 */
+	fn GetFrameErrorCount() int
+
+	/**
+	 * Returns valid frames dropped because receive storage was full since reset
+	 * or the last error clear.
+	 */
+	fn GetReceiveOverflowCount() int
+
+	/**
+	 * Discards queued receive data; clear wins at its FIFO edge.
+	 * Pending receive requests may execute afterward; clear does not cancel them.
+	 */
+	fn ClearReceiveBuffer()
+
+	/**
+	 * Discards queued TX data without truncating an active or committed frame.
+	 * Pending transmit requests may execute afterward; clear does not cancel them.
+	 */
+	fn ClearTransmitBuffer()
+
+	/**
+	 * Clears framing and overflow counters; clear wins over coincident events.
+	 */
+	fn ClearErrors()
+}

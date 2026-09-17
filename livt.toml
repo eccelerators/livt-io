@@ -1,6 +1,6 @@
 [project]
 name = "Livt.IO"
-version = "1.2.0"
+version = "1.2.0-dev"
 path = "src"
 outdir = "out"
 
@@ -10,13 +10,19 @@ components = [
     "RamTest",
     "DistributedRamTest",
     "UartReceiverTest",
+    "UartBaudConfigurationTest",
+    "UartFrameConfigurationTest",
     "UartTransmitterTest",
-    "UartBaseTest",
-    "BufferedUartTest",
     "UartTest",
+    "BufferedUartPermissionTest",
+    "UartCapacityTest",
+    "ConcurrentUartTest",
+    "BufferedUartTest",
+    "BufferedUartApiTest",
     "LoopbackUartTest",
     "RtsCtsBufferedUartTest",
-    "RtsCtsUartTest",
+    "RtsCtsBufferedUartSmokeTest",
+    "UartSynthesisConfigurationTest",
     "I2COpenDrainPinsTest",
     "I2CBusCombinerTest",
     "I2CMasterTest",
@@ -34,3 +40,6 @@ warnings = ["all"]
 
 [build.release]
 warnings = ["all"]
+
+[dependencies]
+Livt.Collections = "1.1.0-dev"

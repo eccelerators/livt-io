@@ -3,24 +3,36 @@ namespace Livt.IO
 /**
  * UartTransmitter
  *
- * Transmits 8-N-1 UART frames on `tx`. A pulse on `tx_dv` starts
+ * Transmits compile-time-configured UART frames on `tx`. A pulse on `tx_dv` starts
  * transmission of `tx_byte`, `tx_active` remains high while the frame
  * is in flight, and `tx_done` pulses for one cycle on completion.
  */
-component UartTransmitter
+component UartTransmitter<
+	DATA_BITS: UartDataBits = UartDataBits.Eight,
+	PARITY: UartParity = UartParity.None,
+	STOP_BITS: UartStopBits = UartStopBits.One,
+	BAUD: Frequency = 115200Hz
+>
 {
-	public const TICKS_PER_BIT: int = 868
+	// Compile-time bit timing and the minimum width of the bit-period counter.
+	const TICKS_PER_BIT: uint = this.context.TicksPer(BAUD)
+	const CLOCK_COUNT_BITS: int = Bits.RequiredFor(TICKS_PER_BIT - 1)
 
+	// Launch request and payload captured when the transmitter is idle.
 	tx_dv: logic
-
-	tx_active: logic
-
-	tx: logic
-
-	tx_done: logic
-
 	tx_byte: logic[8]
 
+	// Physical line and frame-progress observations.
+	tx: logic
+	tx_active: logic
+	tx_done: logic
+
+	// Zero-initialized state represents the idle-high physical line.
+	txLow: logic
+
+	/**
+	 * Configures transmission at a compile-time baud rate and frame format.
+	 */
 	new(
 		tx: out logic,
 		tx_dv: in logic,
@@ -36,18 +48,31 @@ component UartTransmitter
 		tx_done = this.tx_done
 	}
 
+	/**
+	 * Converts the reset-low internal state to the idle-high UART wire.
+	 */
+	process DriveTx[]()
+	{
+		this.tx = ~this.txLow
+	}
+
+	/**
+	 * Serializes the captured byte with compile-time parity and stop-bit selection.
+	 */
 	process Transmitter()
 	{
-		var clock_count = 0
-		var bit_index = 0
+		var clock_count: logic[CLOCK_COUNT_BITS] = (0 as uint) as logic[CLOCK_COUNT_BITS]
+		var bit_index: logic[3] = 0b000
 		var tx_data = 0x00
+		var parity: logic = 0b0
 
 		state Idle {
 			this.tx_active = 0
-			this.tx = 1
+			this.txLow = 0
 			this.tx_done = 0
-			clock_count = 0
+			clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
 			bit_index = 0
+			parity = 0b0
 			if (this.tx_dv) {
 				tx_data = this.tx_byte
 				goto StartBit
@@ -57,40 +82,77 @@ component UartTransmitter
 		}
 		state StartBit {
 			this.tx_active = 1
-			this.tx = 0
-			if (clock_count < TICKS_PER_BIT - 1) {
-				clock_count = clock_count + 1
+			this.txLow = 1
+			if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+				clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
 				goto StartBit
 			} else {
-				clock_count = 0
+				clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
 				goto DataBits
 			}
 		}
 		state DataBits {
-			this.tx = tx_data[bit_index]
-			if (clock_count < TICKS_PER_BIT - 1) {
-				clock_count = clock_count + 1
+			this.txLow = ~tx_data[bit_index as uint]
+			if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+				clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
 				goto DataBits
 			} else {
-				clock_count = 0
-				if (bit_index < 7) {
-					bit_index = bit_index + 1
-					goto DataBits
+				clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
+				static if (PARITY != UartParity.None) { parity = parity ^ tx_data[bit_index as uint] }
+				static if (DATA_BITS == UartDataBits.Five) {
+					if ((bit_index as uint) < 4) { bit_index = ((bit_index as uint) + 1) as logic[3]; goto DataBits }
+					else { bit_index = 0; static if (PARITY == UartParity.None) { goto StopBit } else { goto ParityBit } }
+				} elif (DATA_BITS == UartDataBits.Six) {
+					if ((bit_index as uint) < 5) { bit_index = ((bit_index as uint) + 1) as logic[3]; goto DataBits }
+					else { bit_index = 0; static if (PARITY == UartParity.None) { goto StopBit } else { goto ParityBit } }
+				} elif (DATA_BITS == UartDataBits.Seven) {
+					if ((bit_index as uint) < 6) { bit_index = ((bit_index as uint) + 1) as logic[3]; goto DataBits }
+					else { bit_index = 0; static if (PARITY == UartParity.None) { goto StopBit } else { goto ParityBit } }
 				} else {
-					bit_index = 0
+					if ((bit_index as uint) < 7) { bit_index = ((bit_index as uint) + 1) as logic[3]; goto DataBits }
+					else { bit_index = 0; static if (PARITY == UartParity.None) { goto StopBit } else { goto ParityBit } }
+				}
+			}
+		}
+		static if (PARITY != UartParity.None) {
+			state ParityBit {
+				static if (PARITY == UartParity.Even) { this.txLow = ~parity }
+				else { this.txLow = parity }
+				if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+					clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
+					goto ParityBit
+				} else {
+					clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
 					goto StopBit
 				}
 			}
 		}
 		state StopBit {
-			this.tx = 1
-			if (clock_count < TICKS_PER_BIT - 1) {
-				clock_count = clock_count + 1
+			this.txLow = 0
+			if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+				clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
 				goto StopBit
 			} else {
-				this.tx_done = 1
-				clock_count = 0
-				goto Cleanup
+				clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
+				static if (STOP_BITS == UartStopBits.Two) {
+					goto SecondStopBit
+				} else {
+					this.tx_done = 1
+					goto Cleanup
+				}
+			}
+		}
+		static if (STOP_BITS == UartStopBits.Two) {
+			state SecondStopBit {
+				this.txLow = 0
+				if ((clock_count as uint) < TICKS_PER_BIT - 1) {
+					clock_count = (((clock_count as uint) + 1) as int) as logic[CLOCK_COUNT_BITS]
+					goto SecondStopBit
+				} else {
+					clock_count = (0 as uint) as logic[CLOCK_COUNT_BITS]
+					this.tx_done = 1
+					goto Cleanup
+				}
 			}
 		}
 		state Cleanup {

@@ -9,11 +9,11 @@ namespace Livt.IO
  */
 interface SPIBus
 {
+	// Controller-driven clock, data, and active-low device selection.
 	sclk: in logic
-
 	mosi: in logic
-
-	miso: out logic
-
 	chip_select_n: in logic
+
+	// Peripheral data sampled by the controller.
+	miso: out logic
 }

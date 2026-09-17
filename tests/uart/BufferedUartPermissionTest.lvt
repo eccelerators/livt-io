@@ -1,0 +1,110 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Checks launch permission with a gated loopback and non-power-of-two FIFOs.
+ */
+@Test
+@Context(ClockFrequency=100MHz)
+component BufferedUartPermissionTest
+{
+	buffered: BufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
+	wire: logic
+	permission: bool
+
+	/**
+	 * Starts with launch blocked so queued and physical status differ.
+	 */
+	new() { this.buffered = new BufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>(wire, wire, launchPermission = permission) }
+
+	/**
+	 * Checks full rejection, pending status, wire loopback and cleared data.
+	 */
+	@Test
+	fn TestGatedLoopback()
+	{
+		assert this.buffered.TryTransmit(0x11) == true
+		assert this.buffered.TryTransmit(0x22) == true
+		assert this.buffered.TryTransmit(0x33) == true
+		assert this.buffered.TryTransmit(0xFF) == false
+		assert this.buffered.IsTransmitting() == false
+		assert this.buffered.HasPendingTransmit() == true
+		assert this.buffered.IsTransmitIdle() == false
+		permission = true
+		Simulation.Wait(4000)
+		assert this.buffered.IsTransmitIdle() == true
+		assert this.buffered.GetReceiveCount() == 3
+		var value: byte
+		assert this.buffered.TryReceive(value) == true
+		assert value == 0x11
+		assert this.buffered.TryReceive(value) == true
+		assert value == 0x22
+		assert this.buffered.TryReceive(value) == true
+		assert value == 0x33
+		assert this.buffered.TryReceive(value) == false
+		assert value == 0x00
+		assert this.buffered.GetFrameErrorCount() == 0
+		assert this.buffered.GetReceiveOverflowCount() == 0
+		permission = false
+		assert this.buffered.TryTransmit(0x44) == true
+		this.buffered.ClearTransmitBuffer()
+		assert this.buffered.IsTransmitIdle() == true
+	}
+
+	/**
+	 * Checks overflow reporting and recovery without truncating accepted bytes.
+	 */
+	@Test
+	fn TestReceiveOverflowAndClear()
+	{
+		this.buffered.ClearReceiveBuffer()
+		this.buffered.ClearErrors()
+		permission = true
+		assert this.buffered.TryTransmit(0x41) == true
+		assert this.buffered.TryTransmit(0x42) == true
+		assert this.buffered.TryTransmit(0x43) == true
+		assert this.buffered.TryTransmit(0x44) == true
+		Simulation.Wait(4500)
+		assert this.buffered.GetReceiveCount() == 3
+		assert this.buffered.GetReceiveOverflowCount() == 1
+		var value: byte
+		assert this.buffered.TryReceive(value) == true
+		assert value == 0x41
+		assert this.buffered.TryReceive(value) == true
+		assert value == 0x42
+		assert this.buffered.TryReceive(value) == true
+		assert value == 0x43
+		this.buffered.ClearErrors()
+		assert this.buffered.GetReceiveOverflowCount() == 0
+		assert this.buffered.TryTransmit(0x55) == true
+		Simulation.Wait(1200)
+		this.buffered.ClearReceiveBuffer()
+		assert this.buffered.TryReceive(value) == false
+		assert value == 0x00
+	}
+
+	/**
+	 * Clearing queued TX work must not truncate the currently active frame.
+	 */
+	@Test
+	fn TestClearWhileTransmitting()
+	{
+		this.buffered.ClearReceiveBuffer()
+		permission = true
+		assert this.buffered.TryTransmit(0x61) == true
+		assert this.buffered.TryTransmit(0x62) == true
+		assert this.buffered.IsTransmitting() == true
+		permission = false
+		this.buffered.ClearTransmitBuffer()
+		assert this.buffered.HasPendingTransmit() == true
+		Simulation.Wait(1200)
+		assert this.buffered.IsTransmitIdle() == true
+		assert this.buffered.GetReceiveCount() == 1
+		var value: byte
+		assert this.buffered.TryReceive(value) == true
+		assert value == 0x61
+		assert this.buffered.TryReceive(value) == false
+		assert this.buffered.GetFrameErrorCount() == 0
+	}
+}

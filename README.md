@@ -5,21 +5,20 @@ It combines byte- and word-addressable memory, UART serial I/O, and protocol bus
 helpers into one package so applications can depend on `Livt.IO` instead of
 separate `Ram` or `Uart` packages.
 
-The 1.1.0 package surface is intentionally small and hardware-oriented:
+The 1.2.0 package surface is intentionally small and hardware-oriented:
 
 - `Livt.IO.Ram`: 2048-byte RAM wrapper backed by an opaque VHDL primitive.
 - `Livt.IO.Ram16`: 2048-word RAM wrapper for 16-bit values.
 - `Livt.IO.Ram32`: 2048-word RAM wrapper for 32-bit values.
-- `Livt.IO.DistributedRam32x16`: exact 32-word, 16-bit distributed RAM.
+- `Livt.IO.DistributedRam32x16`: exact 16-word, 32-bit distributed RAM.
 - `Livt.IO.DistributedRam32x32`: exact 32-word, 32-bit distributed RAM.
 - `Livt.IO.DistributedRam8x64`: exact 64-byte distributed RAM.
-- `Livt.IO.UartReceiver`: 8-N-1 UART receive block.
-- `Livt.IO.UartTransmitter`: 8-N-1 UART transmit block.
-- `Livt.IO.UartBase`: low-level combined RX/TX UART block with explicit signals.
-- `Livt.IO.BufferedUart`: UART controller with 64-byte TX/RX FIFOs.
-- `Livt.IO.Uart`: application-friendly buffered UART wrapper.
+- `Livt.IO.UartReceiver`: compile-time-configurable UART receive block.
+- `Livt.IO.UartTransmitter`: compile-time-configurable UART transmit block.
+- `Livt.IO.Uart`: low-level combined RX/TX UART block with explicit signals.
+- `Livt.IO.IBufferedUart`: common scheduled contract for buffered UART implementations.
+- `Livt.IO.BufferedUart`: FIFO-backed application UART with configurable TX/RX capacities.
 - `Livt.IO.RtsCtsBufferedUart`: buffered UART with active-low RTS/CTS flow control.
-- `Livt.IO.RtsCtsUart`: application-friendly RTS/CTS UART wrapper.
 - `Livt.IO.LoopbackUart`: serial loopback wrapper that connects TX to RX.
 - `Livt.IO.I2CBus`: open-drain I2C bus contract.
 - `Livt.IO.I2COpenDrainPins`: adapter from physical `inout` pins to `I2CBus`.
@@ -34,7 +33,7 @@ The 1.1.0 package surface is intentionally small and hardware-oriented:
 
 ```toml
 [dependencies]
-Livt.IO = "1.1.0"
+Livt.IO = "1.2.0-dev"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
@@ -51,17 +50,16 @@ call sites. Protocol components use readable prefixes such as `I2CMaster` and
 | `Ram` | Yes | Fixed 2048-byte memory with byte reads and writes |
 | `Ram16` | Yes | Fixed 2048-word memory with 16-bit reads and writes |
 | `Ram32` | Yes | Fixed 2048-word memory with 32-bit reads and writes |
-| `DistributedRam32x16` | Yes | 32-word, 16-bit single-port distributed RAM |
+| `DistributedRam32x16` | Yes | 16-word, 32-bit single-port distributed RAM |
 | `DistributedRam32x32` | Yes | 32-word, 32-bit single-port distributed RAM |
 | `DistributedRam8x64` | Yes | 64-byte single-port distributed RAM |
 | `InternalRam`, `InternalRam16`, `InternalRam32` | Yes | Opaque VHDL-backed RAM primitive contracts |
-| `UartReceiver` | Yes | Serial RX for fixed 8-N-1 frames |
-| `UartTransmitter` | Yes | Serial TX for fixed 8-N-1 frames |
-| `UartBase` | Yes | Combined RX/TX block with explicit handshake signals |
-| `BufferedUart` | Yes | UART with 64-byte transmit and receive FIFOs |
-| `Uart` | Yes | Application-facing wrapper around `BufferedUart` |
+| `UartReceiver` | Yes | Serial RX with configurable data width, parity, and stop bits |
+| `UartTransmitter` | Yes | Serial TX with configurable data width, parity, and stop bits |
+| `Uart` | Yes | Combined RX/TX block with explicit handshake signals |
+| `IBufferedUart` | Yes | Shared scheduled contract for buffered UART implementations |
+| `BufferedUart` | Yes | FIFO-backed UART with configurable transmit and receive capacities |
 | `RtsCtsBufferedUart` | Yes | Buffered UART with active-low RTS/CTS flow control |
-| `RtsCtsUart` | Yes | Application-facing wrapper around `RtsCtsBufferedUart` |
 | `LoopbackUart` | Yes | Buffered UART wrapper with internal TX-to-RX loopback |
 | `I2CBus` | Yes | Open-drain I2C bus interface |
 | `I2COpenDrainPins` | Yes | Physical `scl`/`sda` pin adapter |
@@ -96,37 +94,85 @@ The `DistributedRam*` components cover small, exact-sized stores that should
 map to FPGA LUT RAM rather than flip-flop arrays or a mostly empty block RAM.
 They provide asynchronous reads and synchronous writes through `Read(address)`
 and `Write(address, value)`. Addresses are statically bounded by each component
-(`0..31` or `0..63`). The opaque VHDL implementations carry the Xilinx
+(`0..15`, `0..31`, or `0..63`). The opaque VHDL implementations carry the Xilinx
 `ram_style = "distributed"` synthesis attribute while keeping the Livt-facing
 API vendor-neutral.
 
 ### UART
 
-UART components use fixed 8-N-1 framing and `TICKS_PER_BIT = 868`, matching
-115200 baud on a 100 MHz clock.
+UART components derive bit timing from their component context. Every UART
+component has a final `BAUD: Frequency = 115200Hz` value parameter, including
+buffered, RTS/CTS, and loopback variants. Baud is structural configuration, so
+it is part of the component type rather than a runtime constructor input:
+
+```livt
+new BufferedUart(rx, tx) // 115200 baud in the effective clock context
+new BufferedUart<64, 64, UartDataBits.Eight, UartParity.None,
+	UartStopBits.One, 921600Hz>(rx, tx)
+```
+
+Frame format is also selected at compile time. The defaults remain 8-N-1. Data
+width accepts `UartDataBits.Five`, `Six`, `Seven`, or `Eight`; parity accepts
+`UartParity.None`, `Even`, or `Odd`; and stop width accepts
+`UartStopBits.One` or `Two`:
+
+```livt
+uart: BufferedUart<64, 64, UartDataBits.Seven, UartParity.Even, UartStopBits.Two>
+```
+
+Formats narrower than eight bits transmit only the least-significant selected
+bits and zero-fill the unused most-significant bits on receive. Because these
+are component value parameters, static specialization removes unselected frame
+branches instead of adding runtime format selectors.
+
+Named constants and forwarded const parameters are supported; runtime baud
+changes are not. The validated clock/baud combinations, rounding error, sampling
+limits, and reproducible measurements are documented in
+[`verification/uart-timing/README.md`](verification/uart-timing/README.md).
 
 `UartReceiver` pulses `rx_dv` for one cycle after a valid byte and pulses
-`rx_frame_error` for one cycle after an invalid stop bit. `UartTransmitter`
+`rx_frame_error` for one cycle after an invalid parity or stop bit. `UartTransmitter`
 starts when `tx_dv` is pulsed, keeps `tx_active` high while a frame is in
 flight, and pulses `tx_done` when transmission completes.
 
-`BufferedUart` adds 64-byte TX and RX FIFOs:
+All buffered variants accept compile-time capacities, defaulting to 64 entries
+each. `BufferedUart` owns the signal-level `Uart` plus two
+`Livt.Collections.Fifo<byte, CAPACITY>` instances. `LoopbackUart` and
+`RtsCtsBufferedUart` compose it and implement `IBufferedUart`, which gives the
+compiler one common implementation contract. The wrappers delegate scheduled
+methods with `IBufferedUart by buffered`. Applications can hold an `IBufferedUart`
+reference when substitution is useful, or use a concrete component type directly.
+`Uart` remains available for custom unbuffered compositions. The shared FIFO
+dependency is declared in `livt.toml` as `Livt.Collections` version `1.1.0-dev`.
 
-- `Transmit(data)` returns `false` when the TX FIFO is full.
-- `Receive()` returns `0x00` when the RX FIFO is empty.
-- `GetAvailableBytes()` and `GetTransmitSpace()` expose FIFO state.
-- `ClearReceiveBuffer()`, `ClearTransmitBuffer()`, and `ClearFrameErrors()`
-  reset buffered state.
+- `TryTransmit(data) bool` reports FIFO acceptance, not wire completion.
+- `TryReceive(data: out byte) bool` atomically removes a byte. Failure assigns
+  zero; a successful zero byte remains distinguishable from an empty queue.
+- `IsTransmitting()` reports an active physical frame.
+- `HasPendingTransmit()` includes pending API requests, queued bytes, committed launches, and active frames.
+- `IsTransmitIdle()` means no transmit work remains.
+- `GetReceiveCount()` and `GetTransmitSpace()` are snapshots, not reservations.
+- `Send(data) int` accepts a prefix and returns its length. It stops at the first
+  rejection; other producers may interleave. It is not an atomic message send.
+- `ClearReceiveBuffer()` discards queued receive data.
+- `ClearTransmitBuffer()` discards queued bytes, preserving an active frame or
+  a byte already committed to launch.
+- `GetFrameErrorCount()`, `GetReceiveOverflowCount()`, and `ClearErrors()`
+  expose and clear receive errors.
 
-`Uart.Send(data)` is all-or-nothing: it queues the complete byte array only when
-enough transmit space is available.
+These are scheduled methods, not one-clock operations. They form the
+`IBufferedUart` contract, including `Send(byte[])`; compile-time interface
+delegation preserves its inferred maximum capacity and per-call logical length.
+Use `Uart` for cycle-sensitive or custom unbuffered applications. See
+[hardware contracts](docs/hardware-notes.md#fifo-behavior).
 
-`RtsCtsBufferedUart` and `RtsCtsUart` add conventional active-low hardware flow
-control without adding logic to the existing UART components. `cts_n = 0`
-allows a new frame to start; releasing CTS pauses before the next frame without
-truncating one already in flight. `rts_n = 0` tells the peer that receive space
-is available. RTS is released at 56 queued bytes and asserted again after the
-FIFO drains to 48 bytes, reserving eight entries for bytes already in flight.
+RTS/CTS wrappers synchronize active-low `ctsN` before granting launch permission.
+A committed or active frame finishes even if CTS changes. Active-low `rtsN`
+uses capacity-derived hysteresis: reserve `ceil(RX_CAPACITY / 8)` entries,
+stop at capacity minus that reserve, and resume one reserve below the stop level.
+Defaults remain 56/48; receive capacity must be at least two for RTS/CTS.
+Small buffers require a correspondingly prompt peer. Basic UART ties permission
+active; elimination of unused flow-control logic still needs synthesis evidence.
 
 ### I2C
 
@@ -211,7 +257,7 @@ livt test
 To force a clean regeneration without removing dependencies:
 
 ```sh
-rm -rf out .livt/src.json .livt/ghdl
+livt clean
 livt test
 ```
 
@@ -232,8 +278,8 @@ Hardware and synthesis notes live in
 
 ## 🚧 Outlook
 
-Future additions may include configurable UART timing, configurable FIFO sizes,
-partial-word write APIs, dual-port RAM, SPI modes 1 through 3, multiple chip
+Future additions may include partial-word write APIs, dual-port RAM,
+SPI modes 1 through 3, multiple chip
 selects, quad-SPI transfers, and `SPISlave`.
 
 ## 📄 License

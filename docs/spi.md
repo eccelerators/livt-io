@@ -60,7 +60,7 @@ first and transmission and reception happen simultaneously.
 
 ## Scope
 
-Version 1.1.0 intentionally supports one portable baseline:
+The current implementation intentionally supports one portable baseline:
 
 - Mode 0 only;
 - one controller and one active-low chip select;

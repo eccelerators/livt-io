@@ -3,90 +3,121 @@ namespace Livt.IO.Tests
 using Livt.IO
 
 @Test
+@Context(ClockFrequency=100MHz)
 component LoopbackUartTest
 {
-	loopback: LoopbackUart
+	// Independent 100 MHz/1 Mbaud timing keeps behavioral regressions short.
+	const TICKS_PER_BIT: int = 100
+
+	loopback: LoopbackUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
 
 	new()
 	{
-		this.loopback = new LoopbackUart()
+		this.loopback = new LoopbackUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>()
 	}
 
 	@Test
 	fn TestInitialState()
 	{
 		// Verify initial state
-		assert this.loopback.GetAvailableBytes() == 0
-		assert this.loopback.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
-		assert this.loopback.IsDataAvailable() == false
-		assert this.loopback.IsBusy() == false
+		assert this.loopback.GetReceiveCount() == 0
+		assert this.loopback.GetTransmitSpace() == 64
+		assert this.loopback.GetReceiveCount() == 0
+		assert this.loopback.IsTransmitting() == false
 	}
 
 	@Test
 	fn TestLoopbackSingleByte()
 	{
 		// Transmit a byte
-		var result = this.loopback.Transmit(0x42)
+		var result = this.loopback.TryTransmit(0x42)
 		assert result == true
 
 		// Initially no data available (transmission in progress)
-		assert this.loopback.IsDataAvailable() == 0b0
+		assert this.loopback.GetReceiveCount() == 0
 
 		// Wait for transmission and reception to complete
 		// Full transmission takes 10 bit periods, plus some for reception
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
+		Simulation.Wait(TICKS_PER_BIT * 12)
 
 		// Data should now be available via loopback
-		assert this.loopback.IsDataAvailable() == 0b1
-		assert this.loopback.GetAvailableBytes() == 1
+		assert this.loopback.GetReceiveCount() > 0
+		assert this.loopback.GetReceiveCount() == 1
 
 		// Receive the looped-back byte
-		var received = this.loopback.Receive()
+		var received: byte
+		assert this.loopback.TryReceive(received) == true
 		assert received == 0x42
 
 		// No more data
-		assert this.loopback.IsDataAvailable() == 0b0
+		assert this.loopback.GetReceiveCount() == 0
 	}
 
 	@Test
 	fn TestLoopbackMultipleBytes()
 	{
 		// Transmit three bytes in sequence
-		assert this.loopback.Transmit(0xAA) == true
-		assert this.loopback.Transmit(0x55) == true
-		assert this.loopback.Transmit(0xFF) == true
+		assert this.loopback.TryTransmit(0xAA) == true
+		assert this.loopback.TryTransmit(0x55) == true
+		assert this.loopback.TryTransmit(0xFF) == true
 
 		// Wait for all to transmit and loop back
 		// 3 bytes × 10 bit periods + margin
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 35)
+		Simulation.Wait(TICKS_PER_BIT * 35)
 
 		// Should have 3 bytes available
-		assert this.loopback.GetAvailableBytes() == 3
+		assert this.loopback.GetReceiveCount() == 3
 
 		// Receive in order
-		var byte1 = this.loopback.Receive()
+		var byte1: byte
+		assert this.loopback.TryReceive(byte1) == true
 		assert byte1 == 0xAA
 
-		var byte2 = this.loopback.Receive()
+		var byte2: byte
+
+		assert this.loopback.TryReceive(byte2) == true
 		assert byte2 == 0x55
 
-		var byte3 = this.loopback.Receive()
+		var byte3: byte
+
+		assert this.loopback.TryReceive(byte3) == true
 		assert byte3 == 0xFF
 
 		// All received
-		assert this.loopback.GetAvailableBytes() == 0
+		assert this.loopback.GetReceiveCount() == 0
+	}
+
+	@Test
+	fn TestDelegatedSend()
+	{
+		this.loopback.ClearReceiveBuffer()
+		this.loopback.ClearTransmitBuffer()
+
+		var message = "Hi".Encode()
+		assert this.loopback.Send(message) == 2
+
+		Simulation.Wait(TICKS_PER_BIT * 25)
+
+		assert this.loopback.GetReceiveCount() == 2
+		var first: byte
+		assert this.loopback.TryReceive(first) == true
+		assert first == 0x48
+		var second: byte
+		assert this.loopback.TryReceive(second) == true
+		assert second == 0x69
 	}
 
 	@Test
 	fn TestLoopbackAllZeros()
 	{
 		// Test edge case: all zeros
-		this.loopback.Transmit(0x00)
+		this.loopback.TryTransmit(0x00)
 
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
+		Simulation.Wait(TICKS_PER_BIT * 12)
 
-		assert this.loopback.IsDataAvailable() == 0b1
-		var received = this.loopback.Receive()
+		assert this.loopback.GetReceiveCount() > 0
+		var received: byte
+		assert this.loopback.TryReceive(received) == true
 		assert received == 0x00
 	}
 
@@ -94,12 +125,13 @@ component LoopbackUartTest
 	fn TestLoopbackAllOnes()
 	{
 		// Test edge case: all ones
-		this.loopback.Transmit(0xFF)
+		this.loopback.TryTransmit(0xFF)
 
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
+		Simulation.Wait(TICKS_PER_BIT * 12)
 
-		assert this.loopback.IsDataAvailable() == 0b1
-		var received = this.loopback.Receive()
+		assert this.loopback.GetReceiveCount() > 0
+		var received: byte
+		assert this.loopback.TryReceive(received) == true
 		assert received == 0xFF
 	}
 
@@ -107,12 +139,13 @@ component LoopbackUartTest
 	fn TestLoopbackPattern()
 	{
 		// Test alternating bit pattern
-		this.loopback.Transmit(0xAA) // 10101010
+		this.loopback.TryTransmit(0xAA) // 10101010
 
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
+		Simulation.Wait(TICKS_PER_BIT * 12)
 
-		assert this.loopback.IsDataAvailable() == 0b1
-		var received = this.loopback.Receive()
+		assert this.loopback.GetReceiveCount() > 0
+		var received: byte
+		assert this.loopback.TryReceive(received) == true
 		assert received == 0xAA
 	}
 
@@ -121,18 +154,18 @@ component LoopbackUartTest
 	{
 		// Verify transmit buffer management
 		var initial_space = this.loopback.GetTransmitSpace()
-		assert initial_space == BufferedUart.BUFFER_SIZE
+		assert initial_space == 64
 
 		// Add a few bytes
-		this.loopback.Transmit(0x11)
-		this.loopback.Transmit(0x22)
-		this.loopback.Transmit(0x33)
+		this.loopback.TryTransmit(0x11)
+		this.loopback.TryTransmit(0x22)
+		this.loopback.TryTransmit(0x33)
 
 		// Wait for transmission to complete
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 35)
+		Simulation.Wait(TICKS_PER_BIT * 35)
 
 		// Buffer should be drained
-		assert this.loopback.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+		assert this.loopback.GetTransmitSpace() == 64
 	}
 
 	@Test
@@ -142,68 +175,78 @@ component LoopbackUartTest
 		this.loopback.ClearTransmitBuffer()
 
 		// Send multiple bytes and verify receive buffer fills
-		this.loopback.Transmit(0x10)
-		this.loopback.Transmit(0x11)
-		this.loopback.Transmit(0x12)
-		this.loopback.Transmit(0x13)
-		this.loopback.Transmit(0x14)
+		this.loopback.TryTransmit(0x10)
+		this.loopback.TryTransmit(0x11)
+		this.loopback.TryTransmit(0x12)
+		this.loopback.TryTransmit(0x13)
+		this.loopback.TryTransmit(0x14)
 
 		// Wait for all to complete
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 60)
+		Simulation.Wait(TICKS_PER_BIT * 60)
 
 		// Should have 5 bytes available
-		assert this.loopback.GetAvailableBytes() == 5
+		assert this.loopback.GetReceiveCount() == 5
 
 		// Receive all in order
-		assert this.loopback.Receive() == 0x10
-		assert this.loopback.Receive() == 0x11
-		assert this.loopback.Receive() == 0x12
-		assert this.loopback.Receive() == 0x13
-		assert this.loopback.Receive() == 0x14
+		var receivedByte1: byte
+		assert this.loopback.TryReceive(receivedByte1) == true
+		assert receivedByte1 == 0x10
+		var receivedByte2: byte
+		assert this.loopback.TryReceive(receivedByte2) == true
+		assert receivedByte2 == 0x11
+		var receivedByte3: byte
+		assert this.loopback.TryReceive(receivedByte3) == true
+		assert receivedByte3 == 0x12
+		var receivedByte4: byte
+		assert this.loopback.TryReceive(receivedByte4) == true
+		assert receivedByte4 == 0x13
+		var receivedByte5: byte
+		assert this.loopback.TryReceive(receivedByte5) == true
+		assert receivedByte5 == 0x14
 
-		assert this.loopback.GetAvailableBytes() == 0
+		assert this.loopback.GetReceiveCount() == 0
 	}
 
 	@Test
 	fn TestClearReceiveBuffer()
 	{
 		// Send a byte
-		this.loopback.Transmit(0x99)
+		this.loopback.TryTransmit(0x99)
 
 		// Wait for loopback
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
+		Simulation.Wait(TICKS_PER_BIT * 12)
 
 		// Should have data
-		assert this.loopback.GetAvailableBytes() == 1
+		assert this.loopback.GetReceiveCount() == 1
 
 		// Clear receive buffer
 		this.loopback.ClearReceiveBuffer()
 
 		// Should be empty
-		assert this.loopback.GetAvailableBytes() == 0
-		assert this.loopback.IsDataAvailable() == 0b0
+		assert this.loopback.GetReceiveCount() == 0
+		assert this.loopback.GetReceiveCount() == 0
 	}
 
 	@Test
 	fn TestClearTransmitBuffer()
 	{
 		// Queue some bytes
-		this.loopback.Transmit(0x12)
-		this.loopback.Transmit(0x34)
+		this.loopback.TryTransmit(0x12)
+		this.loopback.TryTransmit(0x34)
 
 		// Clear immediately (before transmission completes)
 		Simulation.Wait(5)
 		this.loopback.ClearTransmitBuffer()
 
 		// Buffer should be cleared
-		assert this.loopback.GetTransmitSpace() == BufferedUart.BUFFER_SIZE
+		assert this.loopback.GetTransmitSpace() == 64
 
 		// Wait to see if anything was received
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 25)
+		Simulation.Wait(TICKS_PER_BIT * 25)
 
 		// Should have received at most 1 byte (one that was already transmitting)
 		// but likely 0 if cleared fast enough
-		var received_count = this.loopback.GetAvailableBytes()
+		var received_count = this.loopback.GetReceiveCount()
 		assert received_count <= 1
 	}
 
@@ -211,22 +254,22 @@ component LoopbackUartTest
 	fn TestBusySignal()
 	{
 		// Initially not busy
-		assert this.loopback.IsBusy() == 0b0
+		assert this.loopback.IsTransmitting() == 0b0
 
 		// Transmit a byte
-		this.loopback.Transmit(0x77)
+		this.loopback.TryTransmit(0x77)
 
 		// Wait a tiny bit for transmission to start
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 2)
+		Simulation.Wait(TICKS_PER_BIT * 2)
 
 		// Should be busy during transmission
-		assert this.loopback.IsBusy() == 0b1
+		assert this.loopback.IsTransmitting() == 0b1
 
 		// Wait for completion
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
+		Simulation.Wait(TICKS_PER_BIT * 12)
 
 		// Should no longer be busy
-		assert this.loopback.IsBusy() == 0b0
+		assert this.loopback.IsTransmitting() == 0b0
 	}
 
 	@Test
@@ -236,49 +279,71 @@ component LoopbackUartTest
 		this.loopback.ClearTransmitBuffer()
 
 		// Send a sequence of bytes
-		this.loopback.Transmit(0x00)
-		this.loopback.Transmit(0x01)
-		this.loopback.Transmit(0x02)
-		this.loopback.Transmit(0x03)
-		this.loopback.Transmit(0x04)
-		this.loopback.Transmit(0x05)
-		this.loopback.Transmit(0x06)
-		this.loopback.Transmit(0x07)
-		this.loopback.Transmit(0x08)
-		this.loopback.Transmit(0x09)
+		this.loopback.TryTransmit(0x00)
+		this.loopback.TryTransmit(0x01)
+		this.loopback.TryTransmit(0x02)
+		this.loopback.TryTransmit(0x03)
+		this.loopback.TryTransmit(0x04)
+		this.loopback.TryTransmit(0x05)
+		this.loopback.TryTransmit(0x06)
+		this.loopback.TryTransmit(0x07)
+		this.loopback.TryTransmit(0x08)
+		this.loopback.TryTransmit(0x09)
 
 		// Wait for all to complete
-		Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 120)
+		Simulation.Wait(TICKS_PER_BIT * 120)
 
 		// Should have all 10 bytes
-		assert this.loopback.GetAvailableBytes() == 10
+		assert this.loopback.GetReceiveCount() == 10
 
 		// Verify all received correctly
-		assert this.loopback.Receive() == 0x00
-		assert this.loopback.Receive() == 0x01
-		assert this.loopback.Receive() == 0x02
-		assert this.loopback.Receive() == 0x03
-		assert this.loopback.Receive() == 0x04
-		assert this.loopback.Receive() == 0x05
-		assert this.loopback.Receive() == 0x06
-		assert this.loopback.Receive() == 0x07
-		assert this.loopback.Receive() == 0x08
-		assert this.loopback.Receive() == 0x09
+		var receivedByte6: byte
+		assert this.loopback.TryReceive(receivedByte6) == true
+		assert receivedByte6 == 0x00
+		var receivedByte7: byte
+		assert this.loopback.TryReceive(receivedByte7) == true
+		assert receivedByte7 == 0x01
+		var receivedByte8: byte
+		assert this.loopback.TryReceive(receivedByte8) == true
+		assert receivedByte8 == 0x02
+		var receivedByte9: byte
+		assert this.loopback.TryReceive(receivedByte9) == true
+		assert receivedByte9 == 0x03
+		var receivedByte10: byte
+		assert this.loopback.TryReceive(receivedByte10) == true
+		assert receivedByte10 == 0x04
+		var receivedByte11: byte
+		assert this.loopback.TryReceive(receivedByte11) == true
+		assert receivedByte11 == 0x05
+		var receivedByte12: byte
+		assert this.loopback.TryReceive(receivedByte12) == true
+		assert receivedByte12 == 0x06
+		var receivedByte13: byte
+		assert this.loopback.TryReceive(receivedByte13) == true
+		assert receivedByte13 == 0x07
+		var receivedByte14: byte
+		assert this.loopback.TryReceive(receivedByte14) == true
+		assert receivedByte14 == 0x08
+		var receivedByte15: byte
+		assert this.loopback.TryReceive(receivedByte15) == true
+		assert receivedByte15 == 0x09
 
-		assert this.loopback.GetAvailableBytes() == 0
+		assert this.loopback.GetReceiveCount() == 0
 	}
 
 	@Test
 	fn TestReceiveEmptyBuffer()
 	{
 		// Try to receive from empty buffer
-		assert this.loopback.IsDataAvailable() == 0b0
+		assert this.loopback.GetReceiveCount() == 0
 
-		var data = this.loopback.Receive()
+		var data: byte
+
+		assert this.loopback.TryReceive(data) == false
 		// Should return 0x00 when empty
 		assert data == 0x00
 
 		// Should still be empty
-		assert this.loopback.GetAvailableBytes() == 0
+		assert this.loopback.GetReceiveCount() == 0
 	}
 }

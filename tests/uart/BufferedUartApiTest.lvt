@@ -1,0 +1,68 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+@Test
+@Context(ClockFrequency=100MHz)
+component BufferedUartApiTest
+{
+	// Independent 100 MHz/1 Mbaud timing keeps behavioral regressions short.
+	const TICKS_PER_BIT: int = 100
+
+	uart: BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
+
+	loopback_line: logic = 0b1
+
+	new()
+	{
+		this.uart = new BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>(this.loopback_line, this.loopback_line)
+	}
+
+	@Test
+	fn TestSendQueuesWholeMessage()
+	{
+		var message = "Hi".Encode()
+		var sent = this.uart.Send(message)
+		assert sent == 2
+
+		Simulation.Wait(TICKS_PER_BIT * 25)
+
+		assert this.uart.GetReceiveCount() > 0
+		var receivedByte1: byte
+		assert this.uart.TryReceive(receivedByte1) == true
+		assert receivedByte1 == 0x48
+		var receivedByte2: byte
+		assert this.uart.TryReceive(receivedByte2) == true
+		assert receivedByte2 == 0x69
+		assert this.uart.GetReceiveCount() == 0
+	}
+
+	/**
+	 * Sending an empty prefix succeeds with zero accepted bytes.
+	 */
+	@Test
+	fn TestSendEmptyMessage()
+	{
+		var message = "".Encode()
+		assert this.uart.Send(message) == 0
+		assert this.uart.GetTransmitSpace() == 64
+	}
+
+	@Test
+	fn TestForwardsBufferedApi()
+	{
+		assert this.uart.GetReceiveCount() == 0
+		assert this.uart.GetTransmitSpace() == 64
+		assert this.uart.IsTransmitting() == false
+
+		assert this.uart.TryTransmit(0x33) == true
+		assert this.uart.TryTransmit(0x34) == true
+		assert this.uart.GetTransmitSpace() < 64
+
+		this.uart.ClearTransmitBuffer()
+		assert this.uart.GetTransmitSpace() == 64
+
+		this.uart.ClearReceiveBuffer()
+		assert this.uart.GetReceiveCount() == 0
+	}
+}

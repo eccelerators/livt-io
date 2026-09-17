@@ -27,87 +27,82 @@ that range are ignored.
 
 ## UART Byte Send and Receive
 
+Capacities, frame format, and baud are compile-time component value parameters.
+Clock/reset come from the component context.
+
 ```livt
 using Livt.IO
 
 component SerialExample
 {
-    uart: Uart
+	uart: BufferedUart<32, 64, UartDataBits.Eight, UartParity.None,
+		UartStopBits.One, 115200Hz>
 
-    new(rx: in logic, tx: out logic)
-    {
-        this.uart = new Uart(rx, tx)
-    }
+	new(rx: in logic, tx: out logic)
+	{
+		this.uart = new BufferedUart<32, 64, UartDataBits.Eight, UartParity.None,
+			UartStopBits.One, 115200Hz>(rx, tx)
+	}
 
-    public fn SendByte(value: byte) bool
-    {
-        return this.uart.Transmit(value)
-    }
+	public fn SendByte(value: byte) bool
+	{
+		return this.uart.TryTransmit(value)
+	}
 
-    public fn PollByte() byte
-    {
-        if (this.uart.IsDataAvailable())
-        {
-            return this.uart.Receive()
-        }
-        return 0x00
-    }
+	public fn TryReadByte(value: out byte) bool
+	{
+		return this.uart.TryReceive(value)
+	}
 }
 ```
+
+The default frame format is 8-N-1. Select another format by appending its data,
+parity, and stop-bit enum values after the two capacities. For example, 7-E-2 is:
+
+```livt
+uart: BufferedUart<32, 64, UartDataBits.Seven, UartParity.Even, UartStopBits.Two>
+```
+
+Five-, six-, and seven-bit formats use the least-significant byte bits and
+zero-fill the unused bits on receive. The format is statically specialized and
+cannot change at runtime.
+
+Do not check occupancy and then assume a later receive must succeed: status is a
+snapshot. `TryReceive` combines acceptance and removal in one transaction.
 
 ## Buffered Send
 
-```livt
-using Livt.IO
-
-component MessageExample
-{
-    uart: Uart
-
-    new(rx: in logic, tx: out logic)
-    {
-        this.uart = new Uart(rx, tx)
-    }
-
-    public fn SendOk() bool
-    {
-        var message = "OK\n".Encode()
-        return this.uart.Send(message)
-    }
-}
-```
-
-`Send(data)` only queues the message when the transmit FIFO has space for every
-byte.
+`Send(data) int` returns how many prefix bytes were accepted, stopping at the
+first rejection. It does not wait for wire completion or reserve the whole message.
+On a partial result, retain the unsent suffix and retry it later; resending the
+whole message would duplicate its accepted prefix. Concurrent producers may
+interleave their accepted bytes.
 
 ## RTS/CTS Buffered Send
-
-Use `RtsCtsUart` when the board exposes conventional active-low hardware flow
-control pins:
 
 ```livt
 using Livt.IO
 
 component FlowControlledSerialExample
 {
-    uart: RtsCtsUart
+	uart: RtsCtsBufferedUart<64, 32>
 
-    new(rx: in logic, tx: out logic, cts_n: in logic, rts_n: out logic)
-    {
-        this.uart = new RtsCtsUart(rx, tx, cts_n, rts_n)
-    }
+	new(rx: in logic, tx: out logic, ctsN: in logic, rtsN: out logic)
+	{
+		this.uart = new RtsCtsBufferedUart<64, 32>(rx, tx, ctsN, rtsN)
+	}
 
-    public fn SendMessage(data: byte[]) bool
-    {
-        return this.uart.Send(data)
-    }
+	public fn SendMessage(data: byte[]) int
+	{
+		return this.uart.Send(data)
+	}
 }
 ```
 
-The transmitter starts a queued frame only while `cts_n` is low. Releasing CTS
-during a frame does not corrupt that frame; transmission pauses before the next
-one. The UART drives `rts_n` high before its receive FIFO fills and drives it low
-again after enough data has been consumed.
+CTS blocks new frame launches, not completion of active or already committed
+frames. A blocked nonempty UART is pending but is not physically transmitting.
+RTS reserves receive headroom according to the capacity; the peer must honor
+it quickly enough to avoid overflow.
 
 ## Loopback Serial
 
@@ -115,22 +110,27 @@ again after enough data has been consumed.
 using Livt.IO
 
 @Test
+@Context(ClockFrequency=100MHz)
 component LoopbackExampleTest
 {
-    uart: LoopbackUart
+	uart: LoopbackUart<3, 3, UartDataBits.Eight, UartParity.None,
+		UartStopBits.One, 1MHz>
 
-    new()
-    {
-        this.uart = new LoopbackUart()
-    }
+	new()
+	{
+		this.uart = new LoopbackUart<3, 3, UartDataBits.Eight, UartParity.None,
+			UartStopBits.One, 1MHz>()
+	}
 
-    @Test
-    fn EchoesByte()
-    {
-        this.uart.Transmit(0x42)
-        Simulation.Wait(UartTransmitter.TICKS_PER_BIT * 12)
-        assert this.uart.Receive() == 0x42
-    }
+	@Test
+	fn EchoesByte()
+	{
+		assert this.uart.TryTransmit(0x42) == true
+		Simulation.Wait(1200)
+		var value: byte
+		assert this.uart.TryReceive(value) == true
+		assert value == 0x42
+	}
 }
 ```
 

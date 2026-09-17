@@ -18,39 +18,102 @@ value)` ignores invalid addresses.
 
 ## UART
 
-UART framing is fixed to 8-N-1:
+UART framing defaults to 8-N-1 and is specialized through component value
+parameters:
 
 - one low start bit
-- eight data bits, least significant bit first
-- one high stop bit
-- no parity
+- `UartDataBits.Five`, `Six`, `Seven`, or `Eight`, least significant bit first
+- `UartParity.None`, `Even`, or `Odd`
+- `UartStopBits.One` or `Two`, each idle-high
 
-`TICKS_PER_BIT = 868` corresponds to 115200 baud on a 100 MHz clock. To target a
-different baud rate in this release, update the receiver and transmitter
-constants together and rerun the full UART tests.
+Narrow frames consume and produce a byte at the API boundary. TX ignores unused
+most-significant bits; RX zero-fills them. Format branches are evaluated
+statically, so an 8-N-1 instance has no runtime format selector or configurable
+divider.
+
+RX and TX derive their timing from `this.context.TicksPer(BAUD)`, with a default
+baud of `115200Hz`. `BAUD` is a component value parameter forwarded through each
+wrapper, so it can determine counter widths without becoming runtime hardware.
+The intrinsic rounds to the nearest whole clock tick (ties upward, minimum one
+tick); achieved baud is `clock frequency / ticks per bit`.
+
+The validated matrix covers 12, 25, 50, 100, and 125 MHz at 9600, 115200,
+921600, and 1 Mbaud. Use at least 12 ticks per bit for the currently documented
+operating envelope, and check rounding error and the peer's clock tolerance.
+This is not a guarantee for arbitrary clock/baud combinations or line disturbances.
+Baud arguments must be positive integral static values and are checked by the compiler;
+an inadequate clock-to-baud ratio is not currently rejected automatically.
+
+Do not pass a calculated runtime tick count or modify RX/TX constants. See the
+[timing verification contract](../verification/uart-timing/README.md) for measured
+latencies, low-ratio characterization, and synthesis costs.
 
 ## FIFO Behavior
 
-`BufferedUart` uses 64-byte transmit and receive FIFOs.
+TX is idle-high during reset. The transmitter stores the inverted line state
+(reset value zero) and drives its physical output combinationally. Reset aborts
+an in-flight frame and discards FIFO work; a peer may observe a truncated frame
+when reset interrupts traffic. Clear is different: it discards queued data but
+preserves a frame or launch byte already committed to transmission.
 
-- `Transmit(data)` returns `false` when the transmit FIFO is full.
-- Received bytes are dropped when the receive FIFO is full.
-- `Receive()` returns `0x00` when the receive FIFO is empty.
-- `ClearTransmitBuffer()` clears queued bytes but does not cancel a byte already
-  in flight.
-- Framing errors are counted until `ClearFrameErrors()` is called.
+`BufferedUart` owns two `Livt.Collections.Fifo<byte, CAPACITY>`
+instances. Each FIFO has one state owner. At each transfer edge:
 
-`RtsCtsBufferedUart` uses the same FIFO sizes and adds active-low hardware flow
-control. Its `cts_n` input passes through a two-register synchronizer. CTS gates
-only the start of a frame, so releasing it never truncates a frame already in
-flight. The active-low `rts_n` output uses hysteresis: it is released when the
-receive FIFO reaches 56 bytes and asserted again after the count falls to 48.
-The remaining eight entries allow for peer reaction time and bytes already in
-flight.
+- Reset wins over clear, and clear wins over push/pop.
+- Pop requires an old item. Push requires space or a simultaneous accepted pop.
+- Empty simultaneous push/pop accepts only push; there is no empty bypass.
+- Full simultaneous push/pop accepts both and returns the old head.
+- Rejected operations do not change occupancy or pointers.
+- Clear resets occupancy/pointers without erasing payload cells.
+
+This is an intentional library layering choice. Fifo provides hardware-level
+signal access for the UART datapath. Collections Queue wraps the same core in
+convenient application-level scheduled transactions, with extra arbitration
+and completion latency. The UART does not route incoming or outgoing frame data
+through Queue methods; it exposes its own scheduled application API above its
+signal-level FIFOs. Both layers are synthesizable hardware, not a software/runtime
+queue implementation.
+
+`TryTransmit` and `TryReceive` wait for their FIFO result. Per-method dispatch
+serializes callers; pending clear has priority over a pending API transfer.
+A clear leaves a pending API request to be attempted afterward. Do not interpret
+clear as cancellation of other callers. Error clear wins over coincident events.
+A valid received frame rejected by a full FIFO increments the overflow counter.
+
+TX pop captures the head into a launch register, pulses data-valid, and marks
+launch pending until the transmitter becomes active. Clear and CTS must not
+discard that committed byte. Queue emptiness alone therefore does not imply
+transmit idleness. RX removal returns zero on failure, separately from acceptance.
+
+RTS/CTS uses two clocked synchronization stages. RTS stop/resume levels reserve
+`ceil(RX_CAPACITY / 8)` slots and use a reserve-sized hysteresis band.
+At the default capacity 64 they are 56/48; capacity three uses 2/1.
+This is headroom, not a guarantee for arbitrary peer reaction latency or CDC.
+FIFOs are single-clock and do not provide asynchronous clock-domain crossing.
+
+Scheduled API latency includes wrapper dispatch, arbitration, request/result
+synchronization and return. It varies with contention; no one-cycle method claim
+is made. FIFO edge acceptance and API completion are distinct events.
+
+FIFO addresses and occupancy use capacity-derived widths, and payload arrays
+use `@UninitializedStorage` so reset does not erase their cells. Physical RAM
+inference and resource/timing comparisons remain target-dependent; the shared
+source alone does not establish lower physical cost than the archived baseline.
+
+RX/TX bit indices use three-bit vectors; the shared-UART verification harness
+checks that exact width in generated VHDL. Unsigned conversions are used for
+indexing and comparison. Baud counters use `Bits.RequiredFor(TICKS_PER_BIT - 1)`;
+FIFO pointers/counts likewise use capacity-derived widths. These declarations are a source/generated-HDL
+contract, not evidence of reduced device resources without synthesis comparison.
 
 ## Synthesis Notes
 
-`LoopbackUart` is a serial loopback component that connects TX back to RX internally. It is useful for simulation and self-test patterns; external serial I/O should use `Uart`, `BufferedUart`, `RtsCtsUart`, or the lower-level receiver/transmitter components.
+`LoopbackUart` is a serial loopback component that connects TX back to RX
+internally. It is useful for simulation and self-test patterns; external serial
+I/O should normally use `BufferedUart` or `RtsCtsBufferedUart`. Use the low-level
+`Uart`, `UartReceiver`, and `UartTransmitter` components for custom unbuffered
+designs. `LoopbackUart`, `BufferedUart`, and `RtsCtsBufferedUart` implement the
+common `IBufferedUart` scheduled-operation contract.
 
 ## I2C
 
@@ -117,12 +180,13 @@ least one half-period of hold time after the final SCLK edge.
 Chip select remains asserted between completed byte transfers. This supports
 flash protocols that send a command and address before streaming data. Modes 1
 through 3, LSB-first transfers, multiple chip selects, dual SPI, quad SPI, and
-SPI target behavior are outside the 1.1.0 contract.
+SPI target behavior are outside the current contract.
 
 Configuration-flash access may require vendor-specific routing. In particular,
 an AMD 7-series board can require `STARTUPE2` to route user logic to the shared
 configuration clock. Keep that primitive and board constraints outside
 `Livt.IO`; adapt its signals to the portable `SPIBus` contract.
 
-No configurable RAM depth, UART baud, parity, FIFO size, I2C timing, or SPI mode
-is exposed in `Livt.IO 1.1.0`. Those are expected future package additions.
+Configurable RAM depth, I2C timing, and additional SPI modes remain future
+package additions. UART baud, data width, parity, and stop bits are compile-time
+configuration.
