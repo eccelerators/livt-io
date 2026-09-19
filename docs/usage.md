@@ -7,23 +7,25 @@ using Livt.IO
 
 component MemoryExample
 {
-    ram: Ram
+    ram: Ram<byte, 2048>
 
     new()
     {
-        this.ram = new Ram()
+        this.ram = new Ram<byte, 2048>()
     }
 
     public fn StoreAndLoad(address: int, value: byte) byte
     {
-        this.ram.WriteByte(address, value)
-        return this.ram.ReadByte(address)
+        this.ram.Write(address, value)
+        return this.ram.Read(address)
     }
 }
 ```
 
-`Ram` has 2048 cells. Reads outside `0..2047` return `0x00`; writes outside
-that range are ignored.
+This instance has 2048 byte cells. Reads outside `0..2047` return zero; writes
+outside that range are ignored. Cells must be written before reading; reset
+retains their payloads. See [memory configuration and migration](memory.md) for
+storage styles, port-level access and custom backends.
 
 ## UART Byte Send and Receive
 

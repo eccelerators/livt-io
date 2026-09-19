@@ -1,0 +1,51 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Runs the same scheduled transaction owner over portable and custom HDL stores.
+ */
+@Test
+component RamBackendTest
+{
+	// The composition root owns both providers and injects each exactly once.
+	portable: SynchronousRam<logic[16], logic[2], 3, MemoryStyle.Block>
+	custom: CustomRamBackend
+	portableAccess: RamAccess<logic[16], logic[2], 3,
+		SynchronousRam<logic[16], logic[2], 3, MemoryStyle.Block>>
+	customAccess: RamAccess<logic[16], logic[2], 3, CustomRamBackend>
+
+	/**
+	 * Selects implementations at compile time; no runtime backend selector exists.
+	 */
+	new()
+	{
+		this.portable = new SynchronousRam<logic[16], logic[2], 3, MemoryStyle.Block>()
+		this.custom = new CustomRamBackend()
+		this.portableAccess = new RamAccess<logic[16], logic[2], 3,
+			SynchronousRam<logic[16], logic[2], 3, MemoryStyle.Block>>(this.portable)
+		this.customAccess = new RamAccess<logic[16], logic[2], 3, CustomRamBackend>(this.custom)
+	}
+
+	/**
+	 * Exercises high bits, independent cells and invalid requests on both providers.
+	 */
+	@Test
+	fn SubstitutesCustomStorage()
+	{
+		portableAccess.Write(0, 0x8001)
+		portableAccess.Write(2, 0x7FFE)
+		customAccess.Write(0, 0xFEDC)
+		customAccess.Write(2, 0x0123)
+		portableAccess.Write(3, 0)
+		customAccess.Write(-1, 0)
+		assert portableAccess.Read(0) == 0x8001
+		assert portableAccess.Read(2) == 0x7FFE
+		assert customAccess.Read(0) == 0xFEDC
+		assert customAccess.Read(2) == 0x0123
+		assert portableAccess.Read(3) == 0
+		assert customAccess.Read(-1) == 0
+		assert customAccess.IsValidAddress(2)
+		assert !customAccess.IsValidAddress(3)
+	}
+}

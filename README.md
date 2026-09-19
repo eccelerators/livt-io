@@ -7,12 +7,14 @@ separate `Ram` or `Uart` packages.
 
 The 1.2.0 package surface is intentionally small and hardware-oriented:
 
-- `Livt.IO.Ram`: 2048-byte RAM wrapper backed by an opaque VHDL primitive.
-- `Livt.IO.Ram16`: 2048-word RAM wrapper for 16-bit values.
-- `Livt.IO.Ram32`: 2048-word RAM wrapper for 32-bit values.
-- `Livt.IO.DistributedRam32x16`: exact 16-word, 32-bit distributed RAM.
-- `Livt.IO.DistributedRam32x32`: exact 32-word, 32-bit distributed RAM.
-- `Livt.IO.DistributedRam8x64`: exact 64-byte distributed RAM.
+- `Livt.IO.Ram<T, CAPACITY, STYLE>`: scheduled element-addressable memory implementing `IRam<T>`.
+- `Livt.IO.BlockRam<T, CAPACITY>` / `DistributedRam<T, CAPACITY>`: inherited storage-style specializations.
+- `Livt.IO.SynchronousRam<T, ADDRESS, CAPACITY, STYLE>`: one-edge read/write ports.
+- `Livt.IO.AsynchronousRam<T, ADDRESS, CAPACITY, STYLE>`: combinational reads and clocked writes.
+- `Livt.IO.AsynchronousDistributedRam<T, ADDRESS, CAPACITY>`: inherited distributed-style port core.
+- `ISynchronousRam` / `IAsynchronousRam`: separate timing contracts; `RamAccess` accepts a custom synchronous provider.
+- `Livt.IO.Ram16` / `Ram32`: 2048-element block-style specializations.
+- `Livt.IO.AsynchronousDistributedRam32x16`, `AsynchronousDistributedRam32x32`, `AsynchronousDistributedRam8x64`: inherited asynchronous specializations.
 - `Livt.IO.UartReceiver`: compile-time-configurable UART receive block.
 - `Livt.IO.UartTransmitter`: compile-time-configurable UART transmit block.
 - `Livt.IO.Uart`: low-level combined RX/TX UART block with explicit signals.
@@ -47,13 +49,17 @@ call sites. Protocol components use readable prefixes such as `I2CMaster` and
 
 | Component | Synthesizable | Purpose |
 |---|---|---|
-| `Ram` | Yes | Fixed 2048-byte memory with byte reads and writes |
+| `SynchronousRam<T, ADDRESS, CAPACITY, STYLE>` | Yes | One enabled read or write per clock; registered read response |
+| `AsynchronousRam<T, ADDRESS, CAPACITY, STYLE>` | Yes | Combinational read and one clocked write port |
+| `AsynchronousDistributedRam<T, ADDRESS, CAPACITY>` | Yes | Inherited combinational-read core with Distributed intent |
+| `Ram<T, CAPACITY, STYLE>` | Yes | Scheduled Read/Write over one portable storage port |
+| `BlockRam<T, CAPACITY>`, `DistributedRam<T, CAPACITY>` | Yes | Compile-time style specializations |
+| `RamAccess<T, ADDRESS, ELEMENT_COUNT, STORAGE>` | Yes | Scheduled access over an injected synchronous provider |
 | `Ram16` | Yes | Fixed 2048-word memory with 16-bit reads and writes |
 | `Ram32` | Yes | Fixed 2048-word memory with 32-bit reads and writes |
-| `DistributedRam32x16` | Yes | 16-word, 32-bit single-port distributed RAM |
-| `DistributedRam32x32` | Yes | 32-word, 32-bit single-port distributed RAM |
-| `DistributedRam8x64` | Yes | 64-byte single-port distributed RAM |
-| `InternalRam`, `InternalRam16`, `InternalRam32` | Yes | Opaque VHDL-backed RAM primitive contracts |
+| `AsynchronousDistributedRam32x16` | Yes | 16-word, 32-bit single-port distributed RAM |
+| `AsynchronousDistributedRam32x32` | Yes | 32-word, 32-bit single-port distributed RAM |
+| `AsynchronousDistributedRam8x64` | Yes | 64-byte single-port distributed RAM |
 | `UartReceiver` | Yes | Serial RX with configurable data width, parity, and stop bits |
 | `UartTransmitter` | Yes | Serial TX with configurable data width, parity, and stop bits |
 | `Uart` | Yes | Combined RX/TX block with explicit handshake signals |
@@ -74,29 +80,43 @@ call sites. Protocol components use readable prefixes such as `I2CMaster` and
 
 ### Memory
 
-`Ram` exposes a small byte-level random-access contract:
+`Ram<byte, 64>` is the ordinary scheduled API: `Read(address)`,
+`Write(address, value)`, and `IsValidAddress(address)`, through `IRam<T>`.
+Capacity counts elements and must be positive. Invalid reads return zero;
+invalid writes do nothing. Default capacity is 64. `BlockRam<T>` defaults to
+2048 elements; `DistributedRam<T>` defaults to 64. `Ram16` and `Ram32`
+inherit 2048-element block-style RAM with 16-/32-bit logic-vector payloads.
 
-- `ADDRESS_WIDTH = 11`
-- `CAPACITY = 2048`
-- `MAX_ADDRESS = 2047`
-- `IsValidAddress(address)`
-- `WriteByte(address, value)`
-- `ReadByte(address)`
+All portable RAM implementations are now Livt source. Cells are unspecified
+until written and survive reset. Reset cancels scheduled calls; it does not
+erase memory. Applications needing zeros must explicitly write them first.
 
-Valid addresses are `0..2047`. Out-of-range reads return `0x00`; out-of-range
-writes are ignored.
+Storage uses `@Memory(Style=STYLE)` and `@UninitializedStorage`.
+Auto emits no placement hint; Block and Distributed emit direct synthesis
+attributes. These are requests, not guarantees of physical RAM allocation.
+A style choice does not change read timing.
 
-`Ram16` and `Ram32` provide the same 2048-address contract for 16-bit and 32-bit
-words. They expose `Read(address)` and `Write(address, value)`; invalid reads
-return zero and invalid writes are ignored.
+For one-command-per-clock datapaths, use `SynchronousRam` directly. For
+combinational reads, use `AsynchronousRam`. Their separate interfaces include
+the payload type, explicit unsigned address type, and `RamGeometry<CAPACITY>`
+identity. The scheduled `Ram` derives its own narrow address width; low-level
+users supply an address type large enough for every index.
 
-The `DistributedRam*` components cover small, exact-sized stores that should
-map to FPGA LUT RAM rather than flip-flop arrays or a mostly empty block RAM.
-They provide asynchronous reads and synchronous writes through `Read(address)`
-and `Write(address, value)`. Addresses are statically bounded by each component
-(`0..15`, `0..31`, or `0..63`). The opaque VHDL implementations carry the Xilinx
-`ram_style = "distributed"` synthesis attribute while keeping the Livt-facing
-API vendor-neutral.
+The fixed `AsynchronousDistributedRam32x16`, `AsynchronousDistributedRam32x32`,
+and `AsynchronousDistributedRam8x64` inherit `AsynchronousDistributedRam`,
+which binds the Distributed hint on `AsynchronousRam`. They expose `address`,
+boolean `writeEnable`, `writeData`, and `readData` directly; there is no
+compatibility adapter. Wire ports in a combinational process when scheduled
+code needs live observations.
+
+`BlockRam` and `DistributedRam` remain scheduled APIs over synchronous storage.
+“Asynchronous” in the new names identifies read timing; “Distributed” identifies
+storage intent. Inheritance binds configuration without changing the access contract.
+
+See [usage and migration](docs/memory.md) and
+[contracts, measured latency, and verification](verification/memory/README.md).
+The former nongeneric `Ram.ReadByte/WriteByte` API and opaque `InternalRam*`
+primitives are removed; this is an explicit API/startup migration.
 
 ### UART
 

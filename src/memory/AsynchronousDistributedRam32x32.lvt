@@ -1,0 +1,8 @@
+namespace Livt.IO
+
+/**
+ * Thirty-two 32-bit cells with combinational reads and clocked writes.
+ * Inherits distributed-storage intent and the canonical asynchronous ports.
+ */
+component AsynchronousDistributedRam32x32
+	: AsynchronousDistributedRam<logic[32], logic[5], 32> {}

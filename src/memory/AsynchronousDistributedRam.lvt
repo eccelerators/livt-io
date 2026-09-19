@@ -1,0 +1,9 @@
+namespace Livt.IO
+
+/**
+ * Combinational-read RAM requesting distributed storage at compile time.
+ * Inherits the asynchronous ports and behavior without an adapter or extra state.
+ * Writes commit at non-reset rising edges; unwritten cells are unspecified.
+ */
+component AsynchronousDistributedRam<T, ADDRESS, CAPACITY: int = 64>
+	: AsynchronousRam<T, ADDRESS, CAPACITY, MemoryStyle.Distributed> {}

@@ -1,0 +1,8 @@
+namespace Livt.IO
+
+/**
+ * Sixty-four 8-bit cells with combinational reads and clocked writes.
+ * Inherits distributed-storage intent and the canonical asynchronous ports.
+ */
+component AsynchronousDistributedRam8x64
+	: AsynchronousDistributedRam<logic[8], logic[6], 64> {}

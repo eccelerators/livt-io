@@ -1,0 +1,84 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Functional checks for distributed-style combinational-read storage.
+ * Native edge tests separately verify that reads do not require a clock.
+ */
+@Test
+component AsynchronousRamTest
+{
+	// Exercise vector payloads, non-power-of-two depth and capacity one.
+	memory: AsynchronousRam<logic[16], logic[2], 3, MemoryStyle.Distributed>
+	single: AsynchronousRam<byte, logic[1], 1, MemoryStyle.Distributed>
+
+	/**
+	 * Creates independent signal-level memories.
+	 */
+	new()
+	{
+		this.memory = new AsynchronousRam<logic[16], logic[2], 3, MemoryStyle.Distributed>()
+		this.single = new AsynchronousRam<byte, logic[1], 1, MemoryStyle.Distributed>()
+	}
+
+	/**
+	 * Preserves boundary cells and ignores the unused fourth address code.
+	 */
+	@Test
+	fn BoundsWritesAndReads()
+	{
+		state {
+			memory.address = 0
+			memory.writeData = 0x8001
+			memory.writeEnable = true
+		}
+
+		Simulation.Wait(100)
+
+		state {
+			memory.address = 2
+			memory.writeData = 0x7FFE
+		}
+
+		Simulation.Wait(100)
+
+		state {
+			memory.address = 3
+			memory.writeData = 0xFFFF
+		}
+
+		Simulation.Wait(100)
+		memory.writeEnable = false
+		assert memory.readData == 0
+		memory.address = 0
+		Simulation.Wait(100)
+		assert memory.readData == 0x8001
+		memory.address = 2
+		Simulation.Wait(100)
+		assert memory.readData == 0x7FFE
+	}
+
+	/**
+	 * Capacity one still exposes a one-bit address with a checked invalid code.
+	 */
+	@Test
+	fn SupportsSingleCell()
+	{
+		state {
+			single.address = 0
+			single.writeData = 0xA5
+			single.writeEnable = true
+		}
+
+		Simulation.Wait(100)
+		single.writeEnable = false
+		assert single.readData == 0xA5
+		single.address = 1
+		Simulation.Wait(100)
+		assert single.readData == 0
+		single.address = 0
+		Simulation.Wait(100)
+		assert single.readData == 0xA5
+	}
+}

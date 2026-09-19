@@ -1,0 +1,19 @@
+namespace Livt.IO
+
+/**
+ * Single-clock write port with a combinational read of the current address.
+ * Writes commit at non-reset rising edges when writeEnable is true. Invalid
+ * reads return zero and invalid writes are ignored. Reset suppresses writes,
+ * retains cells and does not gate reads. Unwritten cells are unspecified.
+ * A read of the written cell observes the new value after the write edge.
+ */
+interface IAsynchronousRam<T, ADDRESS, GEOMETRY>
+{
+	// Consumer-owned address and write command.
+	writeEnable: in bool
+	address: in ADDRESS
+	writeData: in T
+
+	// Provider-owned combinational response; no read enable or output register.
+	readData: out T
+}

@@ -1,0 +1,59 @@
+namespace Livt.IO
+
+/**
+ * Portable combinational-read RAM with one clocked write port.
+ * Cells are reset-free and unwritten contents are unspecified. STYLE only
+ * supplies a synthesis hint; it never changes the asynchronous read contract.
+ * ADDRESS must represent every index as an unsigned value of at most 32 bits.
+ */
+component AsynchronousRam<T, ADDRESS, CAPACITY: int = 64, STYLE: MemoryStyle = MemoryStyle.Auto>
+	: IAsynchronousRam<T, ADDRESS, RamGeometry<CAPACITY>>
+{
+	// Narrow unsigned address geometry, including capacity one.
+	public const ADDRESS_BITS: int = Bits.RequiredFor(CAPACITY - 1)
+	static assert CAPACITY > 0, "RAM capacity must be positive"
+
+	// Combinational write command, sampled together with the live read address.
+	writeCommand: bool
+	writePayload: T
+
+	// Single-owner payload; no whole-array reset or initialization circuitry.
+	@Memory(Style=STYLE)
+	@UninitializedStorage
+	storage: T[CAPACITY]
+
+	/**
+	 * Keeps enable and payload on the same combinational boundary as address.
+	 */
+	process Command[]()
+	{
+		writeCommand = this.writeEnable
+		writePayload = this.writeData
+	}
+
+	/**
+	 * Reads without waiting for a clock; unused address codes return zero.
+	 */
+	process ReadPort[]()
+	{
+		this.readData = 0
+
+		if ((this.address as uint) < (CAPACITY as uint)) {
+			this.readData = storage[this.address as uint]
+		}
+	}
+
+	/**
+	 * Accepts one valid write per rising edge outside reset.
+	 */
+	process WritePort()
+	{
+		state Tick {
+			if (writeCommand && (this.address as uint) < (CAPACITY as uint)) {
+				storage[this.address as uint] = writePayload
+			}
+
+			goto Tick
+		}
+	}
+}

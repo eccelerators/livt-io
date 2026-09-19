@@ -2,19 +2,46 @@
 
 ## RAM
 
-`Ram` wraps `InternalRam`, an `@Opaque` Livt component backed by the handwritten
-`InternalRam.vhd` primitive. The public wrapper owns range checking and write
-enable sequencing; the VHDL primitive owns storage. The VHDL source lives next to
-the opaque Livt declaration at `src/memory/InternalRam.vhd`.
+The portable RAM family uses Livt arrays, not handwritten storage HDL.
+See [memory usage and migration](memory.md) for API and backend selection.
 
-The published RAM shape is fixed:
+`SynchronousRam<T, ADDRESS, CAPACITY, STYLE>` accepts one mutually exclusive
+read or write at each enabled, non-reset rising edge. Reads update the registered
+response after that edge. Writes, disabled cycles and invalid addresses hold it.
+Reset clears the response and suppresses accesses, retaining cells.
 
-- 2048 addressable cells
-- 11-bit internal address
-- 8-bit data
+`AsynchronousRam<T, ADDRESS, CAPACITY, STYLE>` continuously reads the current
+address. A valid write commits at a non-reset rising edge and becomes visible
+after that edge, including a same-address read. Invalid reads return zero;
+invalid writes are ignored. Reset suppresses writes without gating reads.
+Combinational command wiring aligns address, enable and payload.
 
-`ReadByte(address)` returns `0x00` for invalid addresses. `WriteByte(address,
-value)` ignores invalid addresses.
+`AsynchronousDistributedRam` inherits the asynchronous core and binds Distributed
+intent. Its fixed 8x64, 32x16 and 32x32 subclasses inherit the same canonical
+boolean-enable ports and storage owner; no compatibility wiring component exists.
+
+These are single-clock, single-port memories. Unwritten contents are unspecified.
+The caller supplies a sufficiently wide unsigned ADDRESS type at the low-level
+boundary; ordinary `Ram<T, CAPACITY>` derives its address width automatically.
+
+`RamAccess` adds scheduled transactions over an exclusively owned synchronous
+provider. Pending reads and writes alternate; a read reserves the next edge for
+response capture. Scheduled method completion includes dispatcher overhead:
+the current native `Ram<byte, 3, Block>` regression measures 19 cycles for a
+valid uncontended write and 21 for a valid read, from the request sampling edge
+to completion. Contention adds latency. Use the port cores for throughput-critical
+datapaths rather than assuming scheduled methods complete in one clock.
+
+Block and Distributed are compile-time hints; Auto leaves allocation open.
+Neither selects timing or changes reset behavior. An asynchronous read contract
+may be incompatible with a device's block RAM regardless of its style hint.
+No physical allocation, LUT/FF count or Fmax is claimed.
+
+[Native verification](../verification/memory/README.md) checks timing, indexed
+writes, style attributes, bounds, reset cancellation and retained payloads.
+`Ram16`/`Ram32` retain their scheduled API, not the old internal primitive's
+registered-address timing. Byte masks and zero-filled startup are not part of
+the new contract.
 
 ## UART
 
@@ -187,6 +214,5 @@ an AMD 7-series board can require `STARTUPE2` to route user logic to the shared
 configuration clock. Keep that primitive and board constraints outside
 `Livt.IO`; adapt its signals to the portable `SPIBus` contract.
 
-Configurable RAM depth, I2C timing, and additional SPI modes remain future
-package additions. UART baud, data width, parity, and stop bits are compile-time
+Configurable I2C timing and additional SPI modes remain future package additions. UART baud, data width, parity, and stop bits are compile-time
 configuration.

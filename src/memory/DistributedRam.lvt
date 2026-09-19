@@ -1,0 +1,8 @@
+namespace Livt.IO
+
+/**
+ * Scheduled RAM requesting distributed storage with the same Ram contract.
+ * Uses synchronous storage internally; methods complete over multiple cycles.
+ * For combinational reads use AsynchronousDistributedRam instead.
+ */
+component DistributedRam<T, CAPACITY: int = 64> : Ram<T, CAPACITY, MemoryStyle.Distributed> {}

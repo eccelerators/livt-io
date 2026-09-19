@@ -1,0 +1,10 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Test-only external HDL backend with the same one-edge memory-port contract.
+ * Demonstrates injection of a user-supplied implementation without runtime dispatch.
+ */
+@Opaque
+component CustomRamBackend : ISynchronousRam<logic[16], logic[2], RamGeometry<3>> {}

@@ -1,0 +1,16 @@
+namespace Livt.IO
+
+/**
+ * Compile-time capacity identity for interchangeable storage providers.
+ * Used as the GEOMETRY type argument of the RAM interfaces: the capacity
+ * becomes part of the interface's type identity, even though no port uses it.
+ * RamAccess requires RamGeometry<ELEMENT_COUNT>, so a three-cell provider
+ * cannot satisfy a four-cell consumer, even if both use logic[2] addresses.
+ * This type-only use requires no instance and adds no hardware or runtime cost.
+ * It identifies capacity; it does not verify the provider's implementation
+ * or that its address type is wide enough.
+ */
+component RamGeometry<CAPACITY: int>
+{
+	static assert CAPACITY > 0, "RAM capacity must be positive"
+}

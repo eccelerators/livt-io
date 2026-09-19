@@ -1,0 +1,20 @@
+namespace Livt.IO
+
+/**
+ * Single-clock, single-port storage with a one-edge read response.
+ * At each non-reset rising edge, enable accepts exactly one read or write.
+ * Writes, disabled cycles and invalid addresses hold readData. Reset clears
+ * readData, suppresses commands and retains cells. Unwritten cells are unspecified.
+ * GEOMETRY identifies capacity; ADDRESS is its unsigned hardware address type.
+ */
+interface ISynchronousRam<T, ADDRESS, GEOMETRY>
+{
+	// Consumer-owned command, stable before the accepting edge.
+	enable: in bool
+	writeEnable: in bool
+	address: in ADDRESS
+	writeData: in T
+
+	// Provider-owned response, updated after an accepted read edge.
+	readData: out T
+}

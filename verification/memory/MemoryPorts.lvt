@@ -1,0 +1,26 @@
+namespace Livt.IO.Verification
+
+using Livt.IO
+
+/**
+ * Elaborates both explicit storage styles for native edge-level verification.
+ */
+component MemoryPorts
+{
+	// Separate stores share commands only in the external native testbench.
+	synchronous: SynchronousRam<logic[16], logic[2], 3, MemoryStyle.Block>
+	asynchronous: AsynchronousRam<logic[16], logic[2], 3, MemoryStyle.Distributed>
+	scheduled: Ram<byte, 3, MemoryStyle.Block>
+	fixed: AsynchronousDistributedRam32x16
+
+	/**
+	 * Selects storage geometry and style at compile time.
+	 */
+	new()
+	{
+		this.synchronous = new SynchronousRam<logic[16], logic[2], 3, MemoryStyle.Block>()
+		this.asynchronous = new AsynchronousRam<logic[16], logic[2], 3, MemoryStyle.Distributed>()
+		this.scheduled = new Ram<byte, 3, MemoryStyle.Block>()
+		this.fixed = new AsynchronousDistributedRam32x16()
+	}
+}

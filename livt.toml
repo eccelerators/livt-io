@@ -7,8 +7,13 @@ outdir = "out"
 [tests]
 path = "tests"
 components = [
+    "GenericRamTest",
+    "RamBackendTest",
+    "SynchronousRamTest",
     "RamTest",
-    "DistributedRamTest",
+    "WideRamTest",
+    "AsynchronousRamTest",
+    "AsynchronousDistributedRamTest",
     "UartReceiverTest",
     "UartBaudConfigurationTest",
     "UartFrameConfigurationTest",

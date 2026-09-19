@@ -1,0 +1,24 @@
+namespace Livt.IO
+
+/**
+ * Scheduled element-addressable memory transactions, independent of capacity.
+ * Invalid reads return zero; invalid writes do nothing. Valid unwritten cells
+ * are unspecified. Calls may take multiple cycles and share one storage port.
+ */
+interface IRam<T>
+{
+	/**
+	 * Reads one element after the transaction has acquired the storage port.
+	 */
+	fn Read(address: int) T
+
+	/**
+	 * Writes one element and completes after the write has committed.
+	 */
+	fn Write(address: int, value: T)
+
+	/**
+	 * Reports whether address selects a stored element.
+	 */
+	fn IsValidAddress(address: int) bool
+}

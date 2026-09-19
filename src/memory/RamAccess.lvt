@@ -1,0 +1,132 @@
+namespace Livt.IO
+
+/**
+ * Scheduled transactions over an injected one-edge synchronous storage provider.
+ * Simultaneous pending reads and writes alternate. Reads occupy the accepting
+ * edge and the following capture edge; writes complete at their accepting edge.
+ * Writes win the first tie after reset.
+ * Method dispatch adds cycles. Reset cancels requests without clearing cells.
+ * ADDRESS must represent every index as an unsigned value of at most 32 bits.
+ * The provider must be exclusively owned by this access adapter.
+ */
+component RamAccess<T, ADDRESS, ELEMENT_COUNT: int,
+	STORAGE: ISynchronousRam<T, ADDRESS, RamGeometry<ELEMENT_COUNT>>>
+	: IRam<T>
+{
+	// Compile-time element geometry, shared with the provider constraint.
+	static assert ELEMENT_COUNT > 0, "RAM capacity must be positive"
+
+	// Statically injected provider, owned by the composition root.
+	storage: STORAGE
+
+	// Independent requests and acknowledgements for the two operations.
+	readRequest: bool
+	readCompleted: bool
+	writeRequest: bool
+	writeCompleted: bool
+
+	// Captured request payloads and the retained read result.
+	readAddress: ADDRESS
+	writeAddress: ADDRESS
+	payload: T
+	response: T
+
+	// Fairness and one-edge read-response capture.
+	lastWasWrite: bool
+	readInFlight: bool
+	issueRead: bool
+	issueWrite: bool
+
+	/**
+	 * Binds an existing provider in the same clock/reset context.
+	 */
+	new(storage: STORAGE)
+	{
+		this.storage = storage
+	}
+
+	/**
+	 * Reports whether address is a valid element index.
+	 */
+	override fn IsValidAddress(address: int) bool
+	{
+		return address >= 0 && address < ELEMENT_COUNT
+	}
+
+	/**
+	 * Returns the captured transaction result, or zero for an invalid address.
+	 */
+	override fn Read(address: int) T
+	{
+		if (address < 0 || address >= ELEMENT_COUNT) { return 0 }
+
+		state {
+			readAddress = address as ADDRESS
+			readRequest = !readRequest
+		}
+
+		while (readCompleted != readRequest) {
+			state {}
+		}
+
+		return response
+	}
+
+	/**
+	 * Commits one element before returning; invalid addresses are ignored.
+	 */
+	override fn Write(address: int, value: T)
+	{
+		if (address < 0 || address >= ELEMENT_COUNT) { return }
+
+		state {
+			writeAddress = address as ADDRESS
+			payload = value
+			writeRequest = !writeRequest
+		}
+
+		while (writeCompleted != writeRequest) {
+			state {}
+		}
+	}
+
+	/**
+	 * Selects one request, reserving the edge after a read for response capture.
+	 */
+	process Drive[]()
+	{
+		issueRead = !readInFlight && readRequest != readCompleted &&
+			(writeRequest == writeCompleted || lastWasWrite)
+		issueWrite = !readInFlight && writeRequest != writeCompleted && !issueRead
+		this.storage.enable = issueRead || issueWrite
+		this.storage.writeEnable = issueWrite
+		this.storage.address = readAddress
+		this.storage.writeData = payload
+
+		if (issueWrite) {
+			this.storage.address = writeAddress
+		}
+	}
+
+	/**
+	 * Acknowledges committed writes and captures registered read responses.
+	 */
+	process Complete()
+	{
+		state Tick {
+			if (readInFlight) {
+				response = this.storage.readData
+				readCompleted = readRequest
+				readInFlight = false
+			} elif (issueRead) {
+				readInFlight = true
+				lastWasWrite = false
+			} elif (issueWrite) {
+				writeCompleted = writeRequest
+				lastWasWrite = true
+			}
+
+			goto Tick
+		}
+	}
+}

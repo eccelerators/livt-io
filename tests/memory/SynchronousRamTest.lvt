@@ -1,0 +1,111 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Functional checks for the pure-Livt synchronous storage core.
+ * These scheduled tests check values; exact edge timing needs HDL verification.
+ */
+@Test
+component SynchronousRamTest
+{
+	// Exercise non-power-of-two depth and single-cell wide storage.
+	memory: SynchronousRam<byte, logic[2], 3>
+	single: SynchronousRam<uint, logic[1], 1>
+
+	// Live constructor-bound command signals, owned by the test driver.
+	enable: bool
+	writeEnable: bool
+	address: logic[2]
+	data: byte
+	singleEnable: bool
+	singleWriteEnable: bool
+	singleAddress: logic[1]
+	singleData: uint
+
+	/**
+	 * Creates independent byte and word memories.
+	 */
+	new()
+	{
+		memory = new SynchronousRam<byte, logic[2], 3>()
+		single = new SynchronousRam<uint, logic[1], 1>()
+	}
+
+	/**
+	 * Drives the signal-level interfaces without registered accessors.
+	 */
+	process Wire[]()
+	{
+		this.memory.enable = enable
+		this.memory.writeEnable = writeEnable
+		this.memory.address = address
+		this.memory.writeData = data
+		this.single.enable = singleEnable
+		this.single.writeEnable = singleWriteEnable
+		this.single.address = singleAddress
+		this.single.writeData = singleData
+	}
+
+	/**
+	 * Writes and reads both boundaries, ignoring an unused address code.
+	 */
+	@Test
+	fn PreservesCellsAndIgnoresInvalidAddress()
+	{
+		state {
+			enable = true
+			writeEnable = true
+			address = 0
+			data = 0x5A
+		}
+		Simulation.Wait(100)
+		state {
+			address = 2
+			data = 0xA5
+		}
+		Simulation.Wait(100)
+		state {
+			address = 3
+			data = 0xFF
+		}
+		Simulation.Wait(100)
+		state {
+			writeEnable = false
+			address = 0
+		}
+		Simulation.Wait(100)
+		Simulation.Wait(100)
+		assert memory.readData == 0x5A
+		state { address = 2 }
+		Simulation.Wait(100)
+		Simulation.Wait(100)
+		assert memory.readData == 0xA5
+		state {
+			enable = false
+			address = 0
+		}
+		Simulation.Wait(100)
+		Simulation.Wait(100)
+		assert memory.readData == 0xA5
+	}
+
+	/**
+	 * Stores all word bits at capacity one without a zero-width address.
+	 */
+	@Test
+	fn SupportsSingleCellWords()
+	{
+		state {
+			singleEnable = true
+			singleWriteEnable = true
+			singleAddress = 0
+			singleData = 0x80000001
+		}
+		Simulation.Wait(100)
+		state { singleWriteEnable = false }
+		Simulation.Wait(100)
+		Simulation.Wait(100)
+		assert single.readData == 0x80000001
+	}
+}

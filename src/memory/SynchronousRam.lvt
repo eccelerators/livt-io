@@ -1,0 +1,53 @@
+namespace Livt.IO
+
+/**
+ * Portable single-port, single-clock synchronous storage.
+ * Enabled writes commit at the rising edge; enabled reads update readData after
+ * that edge. Writes and disabled cycles retain readData. Unused address codes
+ * are ignored. Reset clears the output, suppresses accesses, and retains cells.
+ * Initial cell contents are unspecified; write each cell before reading it.
+ * ADDRESS must represent every index as an unsigned value of at most 32 bits.
+ * STYLE is a synthesis hint, independent of the access and reset contract.
+ */
+component SynchronousRam<T, ADDRESS, CAPACITY: int = 64, STYLE: MemoryStyle = MemoryStyle.Auto>
+	: ISynchronousRam<T, ADDRESS, RamGeometry<CAPACITY>>
+{
+	static assert CAPACITY > 0, "RAM capacity must be positive"
+
+	// Narrow address geometry includes a usable bit for capacity one.
+	public const ADDRESS_BITS: int = Bits.RequiredFor(CAPACITY - 1)
+
+	// Registered read response; no scheduled method-call handshake.
+	response: T
+
+	// Payload has no reset or promised power-up value.
+	@Memory(Style=STYLE)
+	@UninitializedStorage
+	storage: T[CAPACITY]
+
+	/**
+	 * Exposes the owner's registered response without another clock boundary.
+	 */
+	process Output[]()
+	{
+		this.readData = this.response
+	}
+
+	/**
+	 * Owns all accesses; one enabled operation can be accepted per clock.
+	 */
+	process Update()
+	{
+		state Tick {
+			if (this.enable && (this.address as uint) < (CAPACITY as uint)) {
+				if (!this.writeEnable) {
+					response = storage[this.address as uint]
+				} else {
+					storage[this.address as uint] = this.writeData
+				}
+			}
+
+			goto Tick
+		}
+	}
+}

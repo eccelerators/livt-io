@@ -1,0 +1,151 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Verifies inherited asynchronous distributed RAMs with explicit live port wiring.
+ */
+@Test
+component AsynchronousDistributedRamTest
+{
+	// Fixed geometry specializations share the generic asynchronous implementation.
+	ram16: AsynchronousDistributedRam32x16
+	ram32: AsynchronousDistributedRam32x32
+	ramBytes: AsynchronousDistributedRam8x64
+
+	// Scheduled drivers own these commands; the hardware ports stay live.
+	address16: logic[4]
+	address32: logic[5]
+	addressBytes: logic[6]
+	write16: bool
+	write32: bool
+	writeBytes: bool
+	data16: logic[32]
+	data32: logic[32]
+	dataBytes: logic[8]
+	result16: logic[32]
+	result32: logic[32]
+	resultBytes: logic[8]
+
+	/**
+	 * Keeps all port observations and commands on one combinational boundary.
+	 */
+	process Wire[]()
+	{
+		this.ram16.address = address16
+		this.ram16.writeEnable = write16
+		this.ram16.writeData = data16
+		result16 = this.ram16.readData
+		this.ram32.address = address32
+		this.ram32.writeEnable = write32
+		this.ram32.writeData = data32
+		result32 = this.ram32.readData
+		this.ramBytes.address = addressBytes
+		this.ramBytes.writeEnable = writeBytes
+		this.ramBytes.writeData = dataBytes
+		resultBytes = this.ramBytes.readData
+	}
+
+	/**
+	 * Constructs three independent stores in the test context.
+	 */
+	new()
+	{
+		this.ram16 = new AsynchronousDistributedRam32x16()
+		this.ram32 = new AsynchronousDistributedRam32x32()
+		this.ramBytes = new AsynchronousDistributedRam8x64()
+	}
+
+	/**
+	 * Writes one word to the sixteen-cell store.
+	 */
+	fn Write16(address: int, value: int)
+	{
+		state {
+			address16 = address as logic[4]
+			data16 = value as logic[32]
+			write16 = true
+		}
+		state { write16 = false }
+	}
+
+	/**
+	 * Reads the live output after updating the sixteen-cell address.
+	 */
+	fn Read16(address: int) int
+	{
+		state { address16 = address as logic[4] }
+		state {}
+		return result16 as int
+	}
+
+	/**
+	 * Writes one word to the thirty-two-cell store.
+	 */
+	fn Write32(address: int, value: int)
+	{
+		state {
+			address32 = address as logic[5]
+			data32 = value as logic[32]
+			write32 = true
+		}
+		state { write32 = false }
+	}
+
+	/**
+	 * Reads the live output after updating the thirty-two-cell address.
+	 */
+	fn Read32(address: int) int
+	{
+		state { address32 = address as logic[5] }
+		state {}
+		return result32 as int
+	}
+
+	/**
+	 * Writes one byte to the sixty-four-cell store.
+	 */
+	fn WriteByte(address: int, value: byte)
+	{
+		state {
+			addressBytes = address as logic[6]
+			dataBytes = value as logic[8]
+			writeBytes = true
+		}
+		state { writeBytes = false }
+	}
+
+	/**
+	 * Reads the live byte output after updating its address.
+	 */
+	fn ReadByte(address: int) byte
+	{
+		state { addressBytes = address as logic[6] }
+		state {}
+		return resultBytes as byte
+	}
+
+	/**
+	 * Writes before reading both boundaries and independent intermediate cells.
+	 */
+	@Test
+	fn StoresIndependentBoundaryWords()
+	{
+		this.Write16(0, 0x12345678)
+		this.Write16(15, -7)
+		assert this.Read16(0) == 0x12345678
+		assert this.Read16(15) == -7
+
+		this.Write32(0, 17)
+		this.Write32(16, 23)
+		this.Write32(31, -31)
+		assert this.Read32(0) == 17
+		assert this.Read32(16) == 23
+		assert this.Read32(31) == -31
+
+		this.WriteByte(0, 0x12)
+		this.WriteByte(63, 0xab)
+		assert this.ReadByte(0) == 0x12
+		assert this.ReadByte(63) == 0xab
+	}
+}

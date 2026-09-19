@@ -1,0 +1,74 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Verifies element geometry, multiple payloads and inherited style selections.
+ * Every valid location is written before it is read.
+ */
+@Test
+component GenericRamTest
+{
+	// Independent stores exercise capacity one and non-power-of-two depths.
+	bytes: Ram<byte, 3>
+	word: Ram<uint, 1>
+	block: BlockRam<logic[16], 7>
+	distributed: DistributedRam<logic[32], 3>
+
+	/**
+	 * Constructs portable stores in the inherited context.
+	 */
+	new()
+	{
+		this.bytes = new Ram<byte, 3>()
+		this.word = new Ram<uint, 1>()
+		this.block = new BlockRam<logic[16], 7>()
+		this.distributed = new DistributedRam<logic[32], 3>()
+	}
+
+	/**
+	 * Checks both boundaries, invalid indices and independent cells.
+	 */
+	@Test
+	fn PreservesElementBounds()
+	{
+		bytes.Write(0, 0x12)
+		bytes.Write(2, 0xAB)
+		bytes.Write(-1, 0xFF)
+		bytes.Write(3, 0xFF)
+		assert bytes.Read(0) == 0x12
+		assert bytes.Read(2) == 0xAB
+		assert bytes.Read(-1) == 0
+		assert bytes.Read(3) == 0
+		assert bytes.IsValidAddress(2) == true
+		assert bytes.IsValidAddress(3) == false
+	}
+
+	/**
+	 * Checks a one-cell unsigned word without narrowing its high bit.
+	 */
+	@Test
+	fn SupportsSingleCell()
+	{
+		word.Write(0, 0x80000001)
+		word.Write(1, 0)
+		assert word.Read(0) == 0x80000001
+		assert word.Read(1) == 0
+	}
+
+	/**
+	 * Both styles retain the scheduled API and exact vector widths.
+	 */
+	@Test
+	fn SpecializesPhysicalStyleWithoutChangingValues()
+	{
+		block.Write(0, 0x8001)
+		block.Write(6, 0x7FFE)
+		distributed.Write(0, 0x80000001)
+		distributed.Write(2, 0x7FFFFFFE)
+		assert block.Read(0) == 0x8001
+		assert block.Read(6) == 0x7FFE
+		assert distributed.Read(0) == 0x80000001
+		assert distributed.Read(2) == 0x7FFFFFFE
+	}
+}
