@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify buffered UART implementations using the local Collections package."""
+import argparse
 import json
 import re
 from pathlib import Path
@@ -11,7 +12,18 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def reset_variants(code):
+    """Check each static reset alternative, not their combined source text."""
+    branch = re.compile(r"^([ \t]*)(\w+)_reset_(sync|async) : if [^\n]+ generate\n"
+                        r"(.*?)^\1end generate;\n?", re.M | re.S)
+    return [branch.sub(lambda match: match[4] if match[3] == mode else "", code)
+            for mode in ("sync", "async")]
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reset-style", choices=("sync", "async"), default="sync")
+    args = parser.parse_args()
     collections = ROOT.parent / "livt-collections"
     version = tomllib.loads((collections / "livt.toml").read_text())["project"]["version"]
     run = Path(tempfile.mkdtemp(prefix="livt-uart-shared-"))
@@ -28,7 +40,7 @@ def main():
         f'path = {json.dumps(str(collections))} }}\n')
     log_path = run / "simulation.log"
     with log_path.open("w") as log:
-        result = subprocess.run(["livt", "test", "-f"], cwd=run, stdout=log,
+        result = subprocess.run(["livt", "test", "-f", f"--default-reset-style={args.reset_style}"], cwd=run, stdout=log,
                                 stderr=subprocess.STDOUT, timeout=300)
     output = log_path.read_text()
     if result.returncode or "15 passed, 0 failed, 0 skipped" not in output or "Simulation finished" not in output:
@@ -39,10 +51,11 @@ def main():
         if not entities:
             raise RuntimeError(f"Missing generated {component}")
         for entity in entities:
-            declarations = re.findall(r"variable bit_index\s*:\s*([^;]+);", entity.read_text())
-            if len(declarations) != 1 or not re.fullmatch(
-                    r'std_logic_vector\(2 downto 0\)\s*:=\s*"000"', declarations[0]):
-                raise RuntimeError(f"Expected exactly one three-bit index: {entity}")
+            for variant in reset_variants(entity.read_text()):
+                declarations = re.findall(r"variable bit_index\s*:\s*([^;]+);", variant)
+                if len(declarations) != 1 or not re.fullmatch(
+                        r'std_logic_vector\(2 downto 0\)\s*:=\s*"000"', declarations[0]):
+                    raise RuntimeError(f"Expected exactly one three-bit index per reset variant: {entity}")
         parity_state = f"{component.removeprefix('Uart').lower()}_paritybit"
         parity_specialized = [parity_state in entity.read_text() for entity in entities]
         if not any(parity_specialized) or all(parity_specialized):

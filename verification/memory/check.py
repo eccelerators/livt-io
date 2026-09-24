@@ -12,10 +12,24 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
 
+def reset_variants(code):
+    """Count writers in each mutually exclusive elaboration alternative."""
+    branch = re.compile(r"^([ \t]*)(\w+)_reset_(sync|async) : if [^\n]+ generate\n"
+                        r"(.*?)^\1end generate;\n?", re.M | re.S)
+    return [branch.sub(lambda match: match[4] if match[3] == mode else "", code)
+            for mode in ("sync", "async")]
+
+
+def has_single_writer(code):
+    return all(len(re.findall(r"this_storage\(.*?<=", variant)) == 1
+               for variant in reset_variants(code))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--no-optimizations", action="store_true")
+    parser.add_argument("--reset-style", choices=("sync", "async"), default="sync")
     args = parser.parse_args()
     stage = Path(tempfile.mkdtemp(prefix="livt-io-memory-edges-"))
     print(f"Sources and evidence: {stage}", flush=True)
@@ -32,7 +46,7 @@ def main():
         '[vhdl]\nfile_header=false\n')
     environment = dict(os.environ)
     environment.pop("_JAVA_OPTIONS", None)
-    command = [environment.get("LIVT", "livt"), "test", "-f"]
+    command = [environment.get("LIVT", "livt"), "test", "-f", f"--default-reset-style={args.reset_style}"]
     if args.release:
         command.append("-R")
     if args.no_optimizations:
@@ -49,7 +63,7 @@ def main():
             continue
         if re.search(r"this_storage\s*<=", code):
             raise RuntimeError(f"Whole-array write/reset in {path}")
-        if len(re.findall(r"this_storage\(.*?<=", code)) != 1:
+        if not has_single_writer(code):
             raise RuntimeError(f"Expected exactly one indexed write site in {path}")
         style = re.search(r'attribute ram_style of this_storage : signal is "(\w+)"', code)
         styles.add(style.group(1) if style else "auto")
@@ -63,7 +77,7 @@ def main():
             raise RuntimeError(f"Inherited storage geometry or hint lost in {path}")
         if re.search(r"entity work\.|this_storage\s*<=|this_\w+_storage\s*<=", code):
             raise RuntimeError(f"Unexpected forwarding instance or whole-array write in {path}")
-        if len(re.findall(r"this_storage\(.*?<=", code)) != 1:
+        if not has_single_writer(code):
             raise RuntimeError(f"Inherited memory does not have exactly one indexed writer: {path}")
     entities = {}
     for kind, style in (("SynchronousRam", "block"), ("AsynchronousRam", "distributed")):
@@ -81,7 +95,7 @@ def main():
             raise RuntimeError(f"Unexpected storage geometry: {matches[0]}")
         if re.search(r"this_storage\s*<=", code):
             raise RuntimeError(f"Whole-array write/reset in {matches[0]}")
-        if len(re.findall(r"this_storage\(.*?<=", code)) != 1:
+        if not has_single_writer(code):
             raise RuntimeError(f"Expected one indexed write site in {matches[0]}")
     bench = (HERE / "edges.vhd").read_text()
     bench = bench.replace("@SYNC@", entities["SynchronousRam"]).replace("@ASYNC@", entities["AsynchronousRam"])

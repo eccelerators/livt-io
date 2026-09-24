@@ -6,6 +6,11 @@ sources and test into a fresh temporary project and uses the sibling
 require both the test summary and `Simulation finished`. Logs and generated HDL
 remain in the printed temporary directory.
 
+Use `--reset-style=sync` (the default) or `--reset-style=async` to exercise the
+compiler's project reset policy. Structural checks inspect each mutually
+exclusive elaboration alternative separately; each selected UART still owns
+one three-bit bit index.
+
 The three tests use a 100 MHz context, 1 Mbaud, and RX/TX capacities of three.
 They check full rejection, blocked-but-pending transmit status, ordered loopback,
 empty receive, RX overflow and recovery, and TX clear during an active frame.
