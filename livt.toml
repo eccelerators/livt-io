@@ -37,7 +37,8 @@ components = [
     "I2CReadIntegrationTest",
     "I2CRegisterIntegrationTest",
     "SPIMasterTest",
-    "SPIMasterSlowContextTest"
+    "SPIMasterSlowContextTest",
+    "SPIMasterConfiguredTimingTest"
 ]
 
 [build.debug]

@@ -257,10 +257,12 @@ and payload can remain in one transaction:
 Accepted commands complete asynchronously. A `Begin*` call returns `false`
 when its preconditions are not satisfied and leaves the controller unchanged.
 
-The requested SCLK half-period is 50 ns. `SPIMaster` converts that duration with
-`this.context.TicksFor(50ns)` during construction, so a parent-selected clock
-context determines the divider. Positive durations round up to a complete
-context tick; the resulting SCLK therefore never exceeds 10 MHz. MISO is
+The default SCLK half-period is 50 ns. Pass a positive compile-time duration
+when more timing margin is needed, for example `new SPIMaster(bus, 100ns)` for
+a clock no faster than 5 MHz. `SPIMaster` converts the duration with
+`this.context.TicksFor(halfPeriod)` during construction; it rounds up to whole
+parent-context ticks. Account for device timing and registered adapter latency
+when choosing the half-period. MISO is
 sampled on the Mode-0 rising edge; the flash may begin changing it on the
 following falling edge.
 

@@ -169,7 +169,7 @@ component SPIMasterTestBus : SPIBus
 		state {
 			elapsedTicks = elapsedTicks + 1
 
-			if (this.chip_select_n == 0b0) {
+			if (this.chip_select_n == 0b0 && this.sclk == 0b0) {
 				var shiftedResponse = (this.responseByte as int) >> (7 - capturedBits)
 
 				if (shiftedResponse % 2 == 0) {
@@ -177,7 +177,7 @@ component SPIMasterTestBus : SPIBus
 				} else {
 					this.miso = 0b1
 				}
-			} else {
+			} elif (this.chip_select_n == 0b1) {
 				this.miso = 0b0
 			}
 
@@ -501,5 +501,64 @@ component SPIMasterSlowContextTest
 		assert this.master.BeginDeselect() == true
 		this.WaitForCommand()
 		assert this.bus.GetDeselectHoldTicks() >= 3
+	}
+}
+
+/**
+ * Verifies an explicitly configured SPI half-period at 50 MHz.
+ */
+@Test
+@Context(ClockFrequency = 50MHz)
+component SPIMasterConfiguredTimingTest
+{
+	bus: SPIMasterTestBus
+
+	master: SPIMaster
+
+	/**
+	 * Creates the controller and its observing bus fixture.
+	 */
+	new()
+	{
+		this.bus = new SPIMasterTestBus()
+		this.master = new SPIMaster(this.bus, 100ns)
+	}
+
+	/**
+	 * Waits for the current asynchronous command to finish.
+	 */
+	fn WaitForCommand()
+	{
+		while (this.master.IsBusy()) {
+			state {}
+		}
+
+		state {}
+	}
+
+	/**
+	 * Verifies five-tick SCLK phases and chip-select setup and hold intervals.
+	 */
+	@Test
+	fn TestConfiguredHalfPeriodControlsTransfers()
+	{
+		assert this.master.HalfPeriodTicks() == 0n5
+		assert this.master.BeginSelect() == true
+		this.WaitForCommand()
+		this.bus.SetResponseByte(0x3C)
+		assert this.master.BeginTransfer(0xA5) == true
+		this.WaitForCommand()
+		assert this.master.GetReceivedByte() == 0x3C
+		assert this.bus.GetCapturedByteAt(0) == 0xA5
+		assert this.bus.GetClockEdgeCount() == 16
+		assert this.bus.GetClockEdgeInterval(0) >= 5
+
+		for (var edgeIndex = 1; edgeIndex < 16; edgeIndex++) {
+			assert this.bus.GetClockEdgeInterval(edgeIndex) == 5
+		}
+
+		assert this.master.BeginDeselect() == true
+		this.WaitForCommand()
+		assert this.bus.GetDeselectHoldTicks() >= 5
 	}
 }

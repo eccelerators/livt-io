@@ -6,7 +6,8 @@ namespace Livt.IO
  * Bytes are transferred most-significant bit first. Chip select is controlled
  * separately so callers can keep one transaction active across command,
  * address, and payload bytes. Timing is derived from the component context;
- * the requested 50 ns half-period produces an SPI clock no faster than 10 MHz.
+ * the default 50 ns half-period produces an SPI clock no faster than 10 MHz.
+ * A longer compile-time half-period allows slower devices and registered adapters.
  */
 component SPIMaster
 {
@@ -34,10 +35,13 @@ component SPIMaster
 	 * Creates an idle Mode 0 controller attached to the supplied SPI bus.
 	 *
 	 * SCLK and MOSI start low, chip select starts high, and no command result is
-	 * pending. The SCLK divider is derived from the inherited component context.
+	 * pending. The positive half-period is rounded up to inherited context ticks.
+	 * Choose it to cover device timing and any registered adapter round-trip latency.
 	 */
-	new(bus: flip SPIBus)
+	new(bus: flip SPIBus, halfPeriod: const Time = 50ns)
 	{
+		static assert halfPeriod >= 1ns, "SPI half-period must be at least one nanosecond"
+
 		this.bus = bus
 		this.bus.sclk = 0b0
 		this.bus.mosi = 0b0
@@ -48,7 +52,7 @@ component SPIMaster
 		this.resultByte = 0x00
 		this.transmitByte = 0x00
 		this.command = COMMAND_NONE
-		this.halfPeriodTicks = this.context.TicksFor(50ns)
+		this.halfPeriodTicks = this.context.TicksFor(halfPeriod)
 	}
 
 	/**

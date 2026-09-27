@@ -320,6 +320,9 @@ The example keeps chip select asserted across the command, address, and data
 byte, then completes the transaction with `BeginDeselect()`. Additional
 `Transfer(0x00)` calls can be inserted before deselection for sequential reads.
 
-The master derives its 50 ns SCLK half-period from the context it inherits
-during construction. Place the containing component in the desired clock
-context so construction and the controller process use the same domain.
+The master derives its default 50 ns SCLK half-period from the inherited
+context. Use `new SPIMaster(bus, 100ns)` for a slower clock (at most 5 MHz),
+allowing for device timing and registered adapter latency. The half-period is a
+positive compile-time `Time`, rounded up to whole context ticks. Place the
+containing component in the desired clock context so construction and the
+controller process use the same domain.
