@@ -5,4 +5,6 @@ namespace Livt.IO
  * Uses synchronous storage internally; methods complete over multiple cycles.
  * For combinational reads use AsynchronousDistributedRam instead.
  */
-component DistributedRam<T, CAPACITY: int = 64> : Ram<T, CAPACITY, MemoryStyle.Distributed> {}
+component DistributedRam<T, CAPACITY: int = 64> : Ram<T, CAPACITY, MemoryStyle.Distributed>
+{
+}

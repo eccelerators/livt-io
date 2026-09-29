@@ -38,6 +38,10 @@ component I2CMaster
 	observedScl: logic
 	observedSda: logic
 
+	/**
+	 * Borrows the open-drain bus, releases both lines, and starts idle with no result. Timing
+	 * assumes a 100 MHz clock; use one serialized command owner.
+	 */
 	new(bus: flip I2CBus)
 	{
 		this.bus = bus
@@ -56,6 +60,10 @@ component I2CMaster
 		this.observedSda = 0b1
 	}
 
+	/**
+	 * Accepts a START request when idle. True means accepted, not completed; poll HasResult.
+	 * Returns false without changing the active command when busy.
+	 */
 	public fn BeginStart() bool
 	{
 		if (this.busy == true) {
@@ -72,6 +80,10 @@ component I2CMaster
 		return true
 	}
 
+	/**
+	 * Accepts a STOP request when idle. True means accepted, not completed; poll HasResult.
+	 * Returns false while busy.
+	 */
 	public fn BeginStop() bool
 	{
 		if (this.busy == true) {
@@ -88,6 +100,10 @@ component I2CMaster
 		return true
 	}
 
+	/**
+	 * Accepts one outgoing data byte when idle and clears previous completion/ACK status. Poll
+	 * HasResult before inspecting ACK; returns false while busy.
+	 */
 	public fn BeginWriteByte(data: byte) bool
 	{
 		if (this.busy == true) {
@@ -107,11 +123,16 @@ component I2CMaster
 		return true
 	}
 
+	/**
+	 * Accepts a seven-bit address byte with the write bit cleared. Returns false while busy or
+	 * for addresses above 0x7F. Does not issue START; poll HasResult for completion.
+	 */
 	public fn BeginWriteAddress(address: byte) bool
 	{
 		if (this.busy == true) {
 			return false
 		}
+
 		if (address > MAX_7_BIT_ADDRESS) {
 			return false
 		}
@@ -132,11 +153,16 @@ component I2CMaster
 		return true
 	}
 
+	/**
+	 * Accepts a seven-bit address byte with the read bit set. Returns false while busy or for
+	 * addresses above 0x7F. Does not issue START; poll HasResult for completion.
+	 */
 	public fn BeginReadAddress(address: byte) bool
 	{
 		if (this.busy == true) {
 			return false
 		}
+
 		if (address > MAX_7_BIT_ADDRESS) {
 			return false
 		}
@@ -157,6 +183,10 @@ component I2CMaster
 		return true
 	}
 
+	/**
+	 * Accepts one byte-read command when idle. sendAck selects ACK versus NACK after
+	 * reception; inspect GetReadByte only after HasResult. Returns false while busy.
+	 */
 	public fn BeginReadByte(sendAck: bool) bool
 	{
 		if (this.busy == true) {
@@ -176,31 +206,54 @@ component I2CMaster
 		return true
 	}
 
+	/**
+	 * Returns a snapshot of command activity; it does not reserve the command slot.
+	 */
 	public fn IsBusy() bool
 	{
 		return this.busy
 	}
 
+	/**
+	 * Reports completion of the accepted command. Completion remains set until ClearResult or
+	 * acceptance of another command.
+	 */
 	public fn HasResult() bool
 	{
 		return this.hasResult
 	}
 
+	/**
+	 * Returns ACK status for the completed write-byte/address command. Valid only after
+	 * HasResult for that command.
+	 */
 	public fn WasAckReceived() bool
 	{
 		return this.resultAck
 	}
 
+	/**
+	 * Returns the inverse of the retained ACK flag. Interpret as a received NACK only after a
+	 * completed write-byte/address command.
+	 */
 	public fn WasNackReceived() bool
 	{
 		return this.resultAck == false
 	}
 
+	/**
+	 * Returns the retained received byte. Valid after HasResult for a read-byte command; does
+	 * not clear completion.
+	 */
 	public fn GetReadByte() byte
 	{
 		return this.resultByte
 	}
 
+	/**
+	 * Clears retained completion and ACK status without canceling the active command or
+	 * clearing the received byte.
+	 */
 	public fn ClearResult()
 	{
 		state {
@@ -209,6 +262,10 @@ component I2CMaster
 		}
 	}
 
+	/**
+	 * Samples SCL and SDA in the component clock context for data reception and clock-stretch
+	 * handling.
+	 */
 	process SampleBus()
 	{
 		state {
@@ -217,6 +274,10 @@ component I2CMaster
 		}
 	}
 
+	/**
+	 * Executes accepted byte commands with standard-mode phase timing. Waits for released SCL
+	 * to rise, retaining bus drive between commands; no clock-stretch timeout is provided.
+	 */
 	process Main()
 	{
 		var phaseTick: int = 0
@@ -235,24 +296,20 @@ component I2CMaster
 				if (this.busy == false) {
 					commandInFlight = false
 				}
+
 				goto Idle
-			}
-			elif (this.busy == false) {
+			} elif (this.busy == false) {
 				goto Idle
-			}
-			elif (this.command == COMMAND_START) {
+			} elif (this.command == COMMAND_START) {
 				commandInFlight = true
 				goto StartRelease
-			}
-			elif (this.command == COMMAND_STOP) {
+			} elif (this.command == COMMAND_STOP) {
 				commandInFlight = true
 				goto StopSdaLow
-			}
-			elif (this.command == COMMAND_WRITE) {
+			} elif (this.command == COMMAND_WRITE) {
 				commandInFlight = true
 				goto WriteBitLow
-			}
-			elif (this.command == COMMAND_READ) {
+			} elif (this.command == COMMAND_READ) {
 				commandInFlight = true
 				goto ReadBitLow
 			} else {
@@ -265,6 +322,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (this.observedScl == 0b1) {
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
@@ -284,6 +342,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b1
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (this.observedScl == 0b1) {
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
@@ -303,6 +362,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b1
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 				this.busy = false
 				this.hasResult = true
@@ -320,6 +380,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b1
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 				phaseTick = 0
 				goto StopSclHigh
@@ -334,6 +395,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b1
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (this.observedScl == 0b1) {
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
@@ -353,6 +415,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 				this.busy = false
 				this.hasResult = true
@@ -370,11 +433,13 @@ component I2CMaster
 			var byteValue: int = this.currentByte as int
 			var shiftAmount: int = 7 - phaseBit
 			var bitValue: int = (byteValue >> shiftAmount) & 1
+
 			if (bitValue == 0) {
 				heldSdaDriveLow = 0b1
 			} else {
 				heldSdaDriveLow = 0b0
 			}
+
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
 
@@ -391,9 +456,11 @@ component I2CMaster
 			heldSclDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (this.observedScl == 0b1) {
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
+
 					if (phaseBit == 7) {
 						goto WriteAckLow
 					} else {
@@ -415,6 +482,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 				phaseTick = 0
 				goto WriteAckHigh
@@ -429,6 +497,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (this.observedScl == 0b1) {
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					this.resultAck = (this.observedSda == 0b0)
@@ -449,6 +518,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 				this.busy = false
 				this.hasResult = true
@@ -466,6 +536,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 				phaseTick = 0
 				goto ReadBitHigh
@@ -480,6 +551,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (this.observedScl == 0b1) {
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
@@ -499,8 +571,10 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (this.observedScl == 0b1) {
 				var sampledBit: int = 0
+
 				if (this.observedSda == 0b1) {
 					sampledBit = 1
 				}
@@ -508,6 +582,7 @@ component I2CMaster
 				var currentValue: int = this.resultByte as int
 				var shiftAmount: int = 7 - phaseBit
 				this.resultByte = (currentValue | (sampledBit << shiftAmount)) as byte
+
 				if (phaseBit == 7) {
 					goto SendAckLow
 				} else {
@@ -522,11 +597,13 @@ component I2CMaster
 
 		state SendAckLow {
 			heldSclDriveLow = 0b1
+
 			if (this.sendAck == true) {
 				heldSdaDriveLow = 0b1
 			} else {
 				heldSdaDriveLow = 0b0
 			}
+
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
 
@@ -543,6 +620,7 @@ component I2CMaster
 			heldSclDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (this.observedScl == 0b1) {
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					heldSdaDriveLow = 0b0
@@ -564,6 +642,7 @@ component I2CMaster
 			heldSdaDriveLow = 0b0
 			this.bus.scl_drive_low = heldSclDriveLow
 			this.bus.sda_drive_low = heldSdaDriveLow
+
 			if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 				this.busy = false
 				this.hasResult = true

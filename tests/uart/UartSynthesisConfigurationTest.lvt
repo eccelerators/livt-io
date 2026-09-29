@@ -7,17 +7,23 @@ using Livt.IO
  * to the reproducible cross-FPGA synthesis benchmark.
  */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component UartSynthesisConfigurationTest
 {
+	// Shared fixture instances, signals, and observation state.
 	buffered: BufferedUart
 	flowControlled: RtsCtsBufferedUart
 
+	// Shared fixture instances, signals, and observation state.
 	bufferedLine: logic = 0b1
 	flowControlledLine: logic = 0b1
 	ctsN: logic = 0b0
 	rtsN: logic
 
+	/**
+	 * Creates the shared fixture instances (BufferedUart, RtsCtsBufferedUart). Tests
+	 * initialize the state required by their scenario.
+	 */
 	new()
 	{
 		this.buffered = new BufferedUart(this.bufferedLine, this.bufferedLine)
@@ -29,6 +35,9 @@ component UartSynthesisConfigurationTest
 		)
 	}
 
+	/**
+	 * Checks the default capacities case.
+	 */
 	@Test
 	fn TestDefaultCapacities()
 	{

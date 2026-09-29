@@ -69,7 +69,9 @@ component SPIMaster
 	 */
 	public fn BeginSelect() bool
 	{
-		if (this.busy || this.selected) { return false }
+		if (this.busy || this.selected) {
+			return false
+		}
 
 		state {
 			this.busy = true
@@ -86,7 +88,9 @@ component SPIMaster
 	 */
 	public fn BeginDeselect() bool
 	{
-		if (this.busy || !this.selected) { return false }
+		if (this.busy || !this.selected) {
+			return false
+		}
 
 		state {
 			this.busy = true
@@ -103,7 +107,9 @@ component SPIMaster
 	 */
 	public fn BeginTransfer(data: byte) bool
 	{
-		if (this.busy || !this.selected) { return false }
+		if (this.busy || !this.selected) {
+			return false
+		}
 
 		state {
 			this.busy = true
@@ -265,7 +271,9 @@ component SPIMaster
 			} else {
 				var receivedValue = (this.resultByte as int) << 1
 
-				if (this.bus.miso == 0b1) { receivedValue = receivedValue + 1 }
+				if (this.bus.miso == 0b1) {
+					receivedValue = receivedValue + 1
+				}
 
 				this.resultByte = receivedValue as byte
 				this.bus.sclk = 0b0

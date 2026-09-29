@@ -27,6 +27,10 @@ component I2CRegisterSlave
 	writtenValue: byte
 	hasWrittenRegister: bool
 
+	/**
+	 * Owns a byte-level I2C target on the borrowed bus and a 256-byte register bank. Starts
+	 * with no valid pointer or write notification; address is masked to seven bits.
+	 */
 	new(bus: flip I2CBus, address: byte)
 	{
 		this.slave = new I2CSlave(bus, address)
@@ -38,55 +42,89 @@ component I2CRegisterSlave
 		this.hasWrittenRegister = false
 	}
 
+	/**
+	 * Writes the byte-addressed register without changing the bus pointer or generating a bus-
+	 * write notification. Coordinate application writes with bus activity.
+	 */
 	public fn SetRegister(address: byte, value: byte)
 	{
 		var index: int = address as int
+
 		state {
 			this.registers[index] = value
 		}
 	}
 
+	/**
+	 * Returns the current byte at address without moving the pointer or clearing events.
+	 */
 	public fn GetRegister(address: byte) byte
 	{
 		var index: int = address as int
 		return this.registers[index]
 	}
 
+	/**
+	 * Selects address, marks the pointer valid, and preloads current/next transmit bytes.
+	 * Coordinate with the bus service process.
+	 */
 	public fn SetPointer(address: byte)
 	{
 		var index: int = address as int
+
 		state {
 			this.pointer = index
 			this.pointerValid = true
 		}
+
 		this.LoadTransmitWindow(index)
 	}
 
+	/**
+	 * Returns the retained register pointer; HasPointer distinguishes a valid selection.
+	 */
 	public fn GetPointer() byte
 	{
 		return this.pointer as byte
 	}
 
+	/**
+	 * Reports whether a pointer has been selected; this snapshot does not reserve it against
+	 * bus activity.
+	 */
 	public fn HasPointer() bool
 	{
 		return this.pointerValid
 	}
 
+	/**
+	 * Reports a retained bus register-write notification. Later writes can replace its
+	 * address/value before it is cleared.
+	 */
 	public fn HasWrittenRegister() bool
 	{
 		return this.hasWrittenRegister
 	}
 
+	/**
+	 * Returns the address of the latest notified bus write; valid with HasWrittenRegister.
+	 */
 	public fn GetWrittenRegister() byte
 	{
 		return this.writtenRegister
 	}
 
+	/**
+	 * Returns the value of the latest notified bus write; valid with HasWrittenRegister.
+	 */
 	public fn GetWrittenValue() byte
 	{
 		return this.writtenValue
 	}
 
+	/**
+	 * Clears the write notification without modifying registers or the retained address/value.
+	 */
 	public fn ClearWrittenRegister()
 	{
 		state {
@@ -94,6 +132,10 @@ component I2CRegisterSlave
 		}
 	}
 
+	/**
+	 * Resets the pointer to zero and invalidates its selection without clearing register
+	 * contents.
+	 */
 	public fn ClearPointer()
 	{
 		state {
@@ -103,20 +145,31 @@ component I2CRegisterSlave
 		}
 	}
 
+	/**
+	 * Returns the byte at the retained pointer, including register zero after ClearPointer;
+	 * does not establish pointer validity.
+	 */
 	public fn GetCurrentRegister() byte
 	{
 		return this.registers[this.pointer]
 	}
 
+	/**
+	 * Treats the first byte after write addressing, or an invalid pointer, as the pointer.
+	 * Otherwise stores the value, records a write event, and advances with wrap at 256. Used
+	 * by the service process; serialize external calls with it.
+	 */
 	public fn AcceptWriteByte(value: byte)
 	{
 		if (this.pointerValid == false || this.expectingPointer == true) {
 			var index: int = value as int
+
 			state {
 				this.pointer = index
 				this.pointerValid = true
 				this.expectingPointer = false
 			}
+
 			this.LoadTransmitWindow(index)
 		} else {
 			state {
@@ -125,28 +178,43 @@ component I2CRegisterSlave
 				this.writtenValue = value
 				this.hasWrittenRegister = true
 			}
+
 			this.AdvancePointer()
 		}
 	}
 
+	/**
+	 * Loads the current and following register into the target transmit window without
+	 * advancing the pointer.
+	 */
 	public fn PrepareReadByte()
 	{
 		this.LoadTransmitWindow(this.pointer)
 	}
 
+	/**
+	 * Advances the pointer and refills the following byte only after controller ACK. NACK
+	 * leaves the pointer unchanged; used by the service process.
+	 */
 	public fn HandleTransmittedByte(acked: bool)
 	{
 		if (acked) {
 			var nextPointer: int = this.NextIndex(this.pointer)
 			var followingPointer: int = this.NextIndex(nextPointer)
 			var followingValue: byte = this.registers[followingPointer]
+
 			state {
 				this.pointer = nextPointer
 			}
+
 			this.slave.SetNextTransmitByte(followingValue)
 		}
 	}
 
+	/**
+	 * Preloads current and next register bytes for index in 0..255, wrapping the next index at
+	 * the bank end.
+	 */
 	fn LoadTransmitWindow(index: int)
 	{
 		var nextIndex: int = this.NextIndex(index)
@@ -156,6 +224,9 @@ component I2CRegisterSlave
 		this.slave.SetNextTransmitByte(nextValue)
 	}
 
+	/**
+	 * Returns the following register index with wrap at 256; requires index in 0..255.
+	 */
 	fn NextIndex(index: int) int
 	{
 		if (index >= REGISTER_COUNT - 1) {
@@ -165,14 +236,23 @@ component I2CRegisterSlave
 		return index + 1
 	}
 
+	/**
+	 * Advances the current valid-range pointer with wrap at the register-bank boundary.
+	 */
 	fn AdvancePointer()
 	{
 		var nextPointer: int = this.NextIndex(this.pointer)
+
 		state {
 			this.pointer = nextPointer
 		}
 	}
 
+	/**
+	 * Consumes address, STOP, receive, and transmit events from the owned target. Maintains
+	 * pointer selection and prefetch data; application access must be coordinated with bus
+	 * activity.
+	 */
 	process ServiceSlave()
 	{
 		if (this.slave.HasAddressMatch()) {
@@ -180,9 +260,9 @@ component I2CRegisterSlave
 				state {
 					this.expectingPointer = true
 				}
+
 				this.slave.ClearAddressMatch()
-			}
-			elif (this.slave.WasReadAddressed()) {
+			} elif (this.slave.WasReadAddressed()) {
 				this.PrepareReadByte()
 				this.slave.ClearReadRequested()
 				this.slave.ClearAddressMatch()
@@ -204,6 +284,7 @@ component I2CRegisterSlave
 			var acked: bool = this.slave.WasTransmitAcked()
 			this.HandleTransmittedByte(acked)
 			this.slave.ClearTransmittedByte()
+
 			if (acked == false) {
 				this.slave.ClearAddressMatch()
 			}

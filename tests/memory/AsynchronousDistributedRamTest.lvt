@@ -66,7 +66,10 @@ component AsynchronousDistributedRamTest
 			data16 = value as logic[32]
 			write16 = true
 		}
-		state { write16 = false }
+
+		state {
+			write16 = false
+		}
 	}
 
 	/**
@@ -74,8 +77,13 @@ component AsynchronousDistributedRamTest
 	 */
 	fn Read16(address: int) int
 	{
-		state { address16 = address as logic[4] }
-		state {}
+		state {
+			address16 = address as logic[4]
+		}
+
+		state {
+		}
+
 		return result16 as int
 	}
 
@@ -89,7 +97,10 @@ component AsynchronousDistributedRamTest
 			data32 = value as logic[32]
 			write32 = true
 		}
-		state { write32 = false }
+
+		state {
+			write32 = false
+		}
 	}
 
 	/**
@@ -97,8 +108,13 @@ component AsynchronousDistributedRamTest
 	 */
 	fn Read32(address: int) int
 	{
-		state { address32 = address as logic[5] }
-		state {}
+		state {
+			address32 = address as logic[5]
+		}
+
+		state {
+		}
+
 		return result32 as int
 	}
 
@@ -112,7 +128,10 @@ component AsynchronousDistributedRamTest
 			dataBytes = value as logic[8]
 			writeBytes = true
 		}
-		state { writeBytes = false }
+
+		state {
+			writeBytes = false
+		}
 	}
 
 	/**
@@ -120,8 +139,13 @@ component AsynchronousDistributedRamTest
 	 */
 	fn ReadByte(address: int) byte
 	{
-		state { addressBytes = address as logic[6] }
-		state {}
+		state {
+			addressBytes = address as logic[6]
+		}
+
+		state {
+		}
+
 		return resultBytes as byte
 	}
 

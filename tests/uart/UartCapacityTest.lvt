@@ -6,9 +6,10 @@ using Livt.IO
  * Checks partial sends, explicit status and RTS headroom on a small public UART.
  */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component UartCapacityTest
 {
+	// Shared fixture instances, signals, and observation state.
 	uart: RtsCtsBufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
 	wire: logic
 	ctsN: logic = 0b1

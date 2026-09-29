@@ -2,17 +2,29 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Test bus adapter that exposes observed line levels and low-drive requests without
+ * physical board pins.
+ */
 component I2CMasterTestBus : I2CBus
 {
+	// Shared fixture instances, signals, and observation state.
 	observed_scl: logic
 	observed_sda: logic
 
+	/**
+	 * Initializes fixture state and constructor bindings. Test cases share the fixture
+	 * instance rather than constructing a fresh subject for each method.
+	 */
 	new()
 	{
 		this.observed_scl = 0b1
 		this.observed_sda = 0b1
 	}
 
+	/**
+	 * Publishes the fixture SCL/SDA levels in the test clock context.
+	 */
 	process ApplyObservedLines()
 	{
 		state {
@@ -21,6 +33,9 @@ component I2CMasterTestBus : I2CBus
 		}
 	}
 
+	/**
+	 * Sets the SCL/SDA levels that the fixture will present to the component under test.
+	 */
 	public fn SetObservedLines(sclValue: logic, sdaValue: logic)
 	{
 		state {
@@ -30,23 +45,42 @@ component I2CMasterTestBus : I2CBus
 	}
 }
 
+/**
+ * Exercises I2CMaster with a shared fixture instance. Each scenario establishes the inputs
+ * and state it needs.
+ */
 @Test
 component I2CMasterTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: I2CMasterTestBus
 	master: I2CMaster
 
+	/**
+	 * Creates the shared fixture instances (I2CMasterTestBus, I2CMaster). Tests initialize the
+	 * state required by their scenario.
+	 */
 	new()
 	{
 		this.bus = new I2CMasterTestBus()
 		this.master = new I2CMaster(this.bus)
 	}
 
+	/**
+	 * Waits until the master is no longer busy; the test runner timeout bounds a stalled
+	 * command.
+	 */
 	fn WaitForCommand()
 	{
-		while (this.master.IsBusy()) { state {} }
+		while (this.master.IsBusy()) {
+			state {
+			}
+		}
 	}
 
+	/**
+	 * Checks the busy rejects second command case.
+	 */
 	@Test
 	fn TestBusyRejectsSecondCommand()
 	{
@@ -68,6 +102,9 @@ component I2CMasterTest
 		assert this.master.HasResult() == false
 	}
 
+	/**
+	 * Checks that a byte write without a responding target completes with NACK.
+	 */
 	@Test
 	fn TestWriteWithoutTargetReportsNack()
 	{
@@ -83,6 +120,9 @@ component I2CMasterTest
 		assert this.master.WasNackReceived() == true
 	}
 
+	/**
+	 * Checks that an external target ACK is retained after the byte write.
+	 */
 	@Test
 	fn TestWriteWithExternalAckReportsAck()
 	{
@@ -98,6 +138,9 @@ component I2CMasterTest
 		assert this.master.WasNackReceived() == false
 	}
 
+	/**
+	 * Checks that BeginWriteAddress sends shifted write address.
+	 */
 	@Test
 	fn TestBeginWriteAddressSendsShiftedWriteAddress()
 	{
@@ -112,6 +155,9 @@ component I2CMasterTest
 		assert this.master.WasAckReceived() == true
 	}
 
+	/**
+	 * Checks that BeginReadAddress sends shifted read address.
+	 */
 	@Test
 	fn TestBeginReadAddressSendsShiftedReadAddress()
 	{
@@ -126,6 +172,9 @@ component I2CMasterTest
 		assert this.master.WasAckReceived() == true
 	}
 
+	/**
+	 * Checks the address helpers reject invalid seven bit address case.
+	 */
 	@Test
 	fn TestAddressHelpersRejectInvalidSevenBitAddress()
 	{
@@ -138,6 +187,9 @@ component I2CMasterTest
 		assert this.master.HasResult() == false
 	}
 
+	/**
+	 * Checks that Read released line returns all ones.
+	 */
 	@Test
 	fn TestReadReleasedLineReturnsAllOnes()
 	{
@@ -152,6 +204,9 @@ component I2CMasterTest
 		assert this.master.GetReadByte() == 0xFF
 	}
 
+	/**
+	 * Checks the clock stretch keeps master busy until scl released case.
+	 */
 	@Test
 	fn TestClockStretchKeepsMasterBusyUntilSclReleased()
 	{

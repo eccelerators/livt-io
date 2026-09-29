@@ -2,25 +2,39 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Exercises BufferedUart with a shared fixture instance. Each scenario establishes the
+ * inputs and state it needs.
+ */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component BufferedUartTest
 {
 	// Independent default-baud timing tolerates scheduled serial-stimulus overhead.
 	const TICKS_PER_BIT: int = 868
 
+	// Shared fixture instances, signals, and observation state.
 	controller: BufferedUart<3, 3>
 
+	// Shared fixture instances, signals, and observation state.
 	loopback_uart: BufferedUart<3, 3>
 
+	// Shared fixture instances, signals, and observation state.
 	rx: logic = 0b1
 
+	// Shared fixture instances, signals, and observation state.
 	tx: logic
 
+	// Shared fixture instances, signals, and observation state.
 	loopback_rx: logic = 0b1
 
+	// Shared fixture instances, signals, and observation state.
 	loopback_tx: logic
 
+	/**
+	 * Creates the shared fixture instances (BufferedUart). Tests initialize the state required
+	 * by their scenario.
+	 */
 	new()
 	{
 		this.controller = new BufferedUart<3, 3>(this.rx, this.tx)
@@ -29,6 +43,9 @@ component BufferedUartTest
 		this.loopback_uart = new BufferedUart<3, 3>(this.loopback_rx, this.loopback_tx)
 	}
 
+	/**
+	 * Checks the initial state case.
+	 */
 	@Test
 	fn TestInitialState()
 	{
@@ -39,6 +56,9 @@ component BufferedUartTest
 		assert this.controller.IsTransmitting() == 0b0
 	}
 
+	/**
+	 * Checks the transmit single byte case.
+	 */
 	@Test
 	fn TestTransmitSingleByte()
 	{
@@ -57,6 +77,9 @@ component BufferedUartTest
 		assert this.controller.GetTransmitSpace() == 3
 	}
 
+	/**
+	 * Checks the transmit multiple bytes case.
+	 */
 	@Test
 	fn TestTransmitMultipleBytes()
 	{
@@ -78,6 +101,9 @@ component BufferedUartTest
 		assert this.controller.GetTransmitSpace() == 3
 	}
 
+	/**
+	 * Checks the transmit buffer full case.
+	 */
 	@Test
 	fn TestTransmitBufferFull()
 	{
@@ -100,6 +126,9 @@ component BufferedUartTest
 		assert this.controller.GetTransmitSpace() == 3
 	}
 
+	/**
+	 * Checks the receive single byte case.
+	 */
 	@Test
 	fn TestReceiveSingleByte()
 	{
@@ -152,6 +181,9 @@ component BufferedUartTest
 		Simulation.Wait(10)
 	}
 
+	/**
+	 * Checks the receive multiple bytes case.
+	 */
 	@Test
 	fn TestReceiveMultipleBytes()
 	{
@@ -229,6 +261,9 @@ component BufferedUartTest
 		Simulation.Wait(10)
 	}
 
+	/**
+	 * Checks the receive buffer full case.
+	 */
 	@Test
 	fn TestReceiveBufferFull()
 	{
@@ -274,6 +309,9 @@ component BufferedUartTest
 		Simulation.Wait(10)
 	}
 
+	/**
+	 * Checks the frame error does not queue data case.
+	 */
 	@Test
 	fn TestFrameErrorDoesNotQueueData()
 	{
@@ -345,6 +383,9 @@ component BufferedUartTest
 		assert this.controller.GetFrameErrorCount() == 1
 	}
 
+	/**
+	 * Checks the clear receive buffer case.
+	 */
 	@Test
 	fn TestClearReceiveBuffer()
 	{
@@ -380,6 +421,9 @@ component BufferedUartTest
 		Simulation.Wait(10)
 	}
 
+	/**
+	 * Checks the clear transmit buffer case.
+	 */
 	@Test
 	fn TestClearTransmitBuffer()
 	{
@@ -403,6 +447,9 @@ component BufferedUartTest
 		assert this.tx == 0b1
 	}
 
+	/**
+	 * Checks the receive empty buffer case.
+	 */
 	@Test
 	fn TestReceiveEmptyBuffer()
 	{
@@ -414,6 +461,7 @@ component BufferedUartTest
 		var data: byte
 
 		assert this.controller.TryReceive(data) == false
+
 		// Should return 0x00 when buffer is empty
 		assert data == 0x00
 
@@ -421,6 +469,9 @@ component BufferedUartTest
 		assert this.controller.GetReceiveCount() == 0
 	}
 
+	/**
+	 * Checks the clear frame errors case.
+	 */
 	@Test
 	fn TestClearFrameErrors()
 	{
@@ -431,10 +482,12 @@ component BufferedUartTest
 		Simulation.Wait(100)
 		this.rx = 0b0 // Start bit
 		Simulation.Wait(TICKS_PER_BIT)
+
 		for (var i = 0; i < 8; i = i + 1) {
 			this.rx = 0b0
 			Simulation.Wait(TICKS_PER_BIT)
 		}
+
 		this.rx = 0b0 // Invalid stop bit
 		Simulation.Wait(TICKS_PER_BIT * 2)
 
@@ -450,6 +503,9 @@ component BufferedUartTest
 		Simulation.Wait(10)
 	}
 
+	/**
+	 * Checks the loopback transmit receive case.
+	 */
 	@Test
 	fn TestLoopbackTransmitReceive()
 	{

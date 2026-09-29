@@ -4,12 +4,10 @@ namespace Livt.IO
  * Low-level UART that combines `UartReceiver` and
  * `UartTransmitter` behind explicit control and status signals.
  */
-component Uart<
-	DATA_BITS: UartDataBits = UartDataBits.Eight,
+component Uart<DATA_BITS: UartDataBits = UartDataBits.Eight,
 	PARITY: UartParity = UartParity.None,
 	STOP_BITS: UartStopBits = UartStopBits.One,
-	BAUD: Frequency = 115200Hz
->
+	BAUD: Frequency = 115200Hz>
 {
 	// Independent receive and transmit paths share the selected format and context.
 	receiver: UartReceiver<DATA_BITS, PARITY, STOP_BITS, BAUD>

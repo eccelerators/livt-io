@@ -2,22 +2,35 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Exercises BufferedUartApi with a shared fixture instance. Each scenario establishes the
+ * inputs and state it needs.
+ */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component BufferedUartApiTest
 {
 	// Independent 100 MHz/1 Mbaud timing keeps behavioral regressions short.
 	const TICKS_PER_BIT: int = 100
 
+	// Shared fixture instances, signals, and observation state.
 	uart: BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
 
+	// Shared fixture instances, signals, and observation state.
 	loopback_line: logic = 0b1
 
+	/**
+	 * Creates the shared fixture instances (BufferedUart). Tests initialize the state required
+	 * by their scenario.
+	 */
 	new()
 	{
 		this.uart = new BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>(this.loopback_line, this.loopback_line)
 	}
 
+	/**
+	 * Checks that Send queues whole message.
+	 */
 	@Test
 	fn TestSendQueuesWholeMessage()
 	{
@@ -48,6 +61,9 @@ component BufferedUartApiTest
 		assert this.uart.GetTransmitSpace() == 64
 	}
 
+	/**
+	 * Checks the forwards buffered api case.
+	 */
 	@Test
 	fn TestForwardsBufferedApi()
 	{

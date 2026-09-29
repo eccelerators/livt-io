@@ -6,9 +6,10 @@ using Livt.IO
  * Exercises shared mutation dispatch with simultaneous producers and consumers.
  */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component ConcurrentUartTest
 {
+	// Shared fixture instances, signals, and observation state.
 	uart: BufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
 	wire: logic
 	firstDone: bool
@@ -31,6 +32,7 @@ component ConcurrentUartTest
 		state Start {
 			for (var index = 0; index < 8; index++) {
 				var accepted = false
+
 				while (!accepted) {
 					accepted = this.uart.TryTransmit((index + 1) as byte)
 				}
@@ -40,7 +42,9 @@ component ConcurrentUartTest
 			goto Done
 		}
 
-		state Done { goto Done }
+		state Done {
+			goto Done
+		}
 	}
 
 	/**
@@ -51,6 +55,7 @@ component ConcurrentUartTest
 		state Start {
 			for (var index = 0; index < 8; index++) {
 				var accepted = false
+
 				while (!accepted) {
 					accepted = this.uart.TryTransmit((index + 129) as byte)
 				}
@@ -60,7 +65,9 @@ component ConcurrentUartTest
 			goto Done
 		}
 
-		state Done { goto Done }
+		state Done {
+			goto Done
+		}
 	}
 
 	/**
@@ -95,7 +102,9 @@ component ConcurrentUartTest
 			goto Done
 		}
 
-		state Done { goto Done }
+		state Done {
+			goto Done
+		}
 	}
 
 	/**

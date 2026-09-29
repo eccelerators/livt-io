@@ -6,10 +6,13 @@ using Livt.IO
  * Checks non-default baud forwarding through each application-facing wrapper.
  */
 @Test
-@Context(ClockFrequency=25MHz)
+@Context(ClockFrequency = 25MHz)
 component UartBaudConfigurationTest
 {
+	// Compile-time dimensions, bounds, and numeric constants.
 	const BAUD: Frequency = 1MHz
+
+	// Shared fixture instances, signals, and observation state.
 	uart: BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>
 	buffered: BufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, BAUD>
 	flow: RtsCtsBufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, (500000Hz + 500000Hz)>

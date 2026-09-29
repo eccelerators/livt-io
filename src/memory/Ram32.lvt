@@ -3,4 +3,6 @@ namespace Livt.IO
 /**
  * Convenient 2,048-element 32-bit RAM requesting block storage.
  */
-component Ram32 : BlockRam<logic[32], 2048> {}
+component Ram32 : BlockRam<logic[32], 2048>
+{
+}

@@ -2,8 +2,16 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Test bus adapter that exposes observed line levels and low-drive requests without
+ * physical board pins.
+ */
 component I2CRegisterSlaveSmokeBus : I2CBus
 {
+	/**
+	 * Initializes fixture state and constructor bindings. Test cases share the fixture
+	 * instance rather than constructing a fresh subject for each method.
+	 */
 	new()
 	{
 		this.scl = 0b1
@@ -11,18 +19,30 @@ component I2CRegisterSlaveSmokeBus : I2CBus
 	}
 }
 
+/**
+ * Exercises I2CRegisterSlave with a shared fixture instance. Each scenario establishes the
+ * inputs and state it needs.
+ */
 @Test
 component I2CRegisterSlaveTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: I2CRegisterSlaveSmokeBus
 	registers: I2CRegisterSlave
 
+	/**
+	 * Creates the shared fixture instances (I2CRegisterSlaveSmokeBus, I2CRegisterSlave). Tests
+	 * initialize the state required by their scenario.
+	 */
 	new()
 	{
 		this.bus = new I2CRegisterSlaveSmokeBus()
 		this.registers = new I2CRegisterSlave(this.bus, 0x42)
 	}
 
+	/**
+	 * Checks the initial pointer state case.
+	 */
 	@Test
 	fn TestInitialPointerState()
 	{
@@ -31,6 +51,9 @@ component I2CRegisterSlaveTest
 		assert this.registers.HasWrittenRegister() == false
 	}
 
+	/**
+	 * Checks the set and get register case.
+	 */
 	@Test
 	fn TestSetAndGetRegister()
 	{
@@ -41,6 +64,9 @@ component I2CRegisterSlaveTest
 		assert this.registers.GetRegister(0x80) == 0xCD
 	}
 
+	/**
+	 * Checks the pointer can be set and cleared case.
+	 */
 	@Test
 	fn TestPointerCanBeSetAndCleared()
 	{
@@ -55,6 +81,9 @@ component I2CRegisterSlaveTest
 		assert this.registers.GetPointer() == 0x00
 	}
 
+	/**
+	 * Checks that ClearWrittenRegister flag.
+	 */
 	@Test
 	fn TestClearWrittenRegisterFlag()
 	{
@@ -65,6 +94,9 @@ component I2CRegisterSlaveTest
 		assert this.registers.GetWrittenValue() == 0x00
 	}
 
+	/**
+	 * Checks that AcceptWriteByte selects pointer then writes and increments.
+	 */
 	@Test
 	fn TestAcceptWriteByteSelectsPointerThenWritesAndIncrements()
 	{
@@ -90,6 +122,9 @@ component I2CRegisterSlaveTest
 		assert this.registers.GetWrittenValue() == 0xCD
 	}
 
+	/**
+	 * Checks that AcceptWriteByte wraps pointer.
+	 */
 	@Test
 	fn TestAcceptWriteByteWrapsPointer()
 	{
@@ -102,6 +137,9 @@ component I2CRegisterSlaveTest
 		assert this.registers.GetWrittenValue() == 0x5A
 	}
 
+	/**
+	 * Checks the current register follows pointer case.
+	 */
 	@Test
 	fn TestCurrentRegisterFollowsPointer()
 	{
@@ -115,6 +153,9 @@ component I2CRegisterSlaveTest
 		assert this.registers.GetCurrentRegister() == 0x66
 	}
 
+	/**
+	 * Checks that HandleTransmittedByte advances only on ack.
+	 */
 	@Test
 	fn TestHandleTransmittedByteAdvancesOnlyOnAck()
 	{

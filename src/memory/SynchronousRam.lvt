@@ -9,8 +9,7 @@ namespace Livt.IO
  * ADDRESS must represent every index as an unsigned value of at most 32 bits.
  * STYLE is a synthesis hint, independent of the access and reset contract.
  */
-component SynchronousRam<T, ADDRESS, CAPACITY: int = 64, STYLE: MemoryStyle = MemoryStyle.Auto>
-	: ISynchronousRam<T, ADDRESS, RamGeometry<CAPACITY>>
+component SynchronousRam<T, ADDRESS, CAPACITY: int = 64, STYLE: MemoryStyle = MemoryStyle.Auto> : ISynchronousRam<T, ADDRESS, RamGeometry<CAPACITY>>
 {
 	static assert CAPACITY > 0, "RAM capacity must be positive"
 
@@ -21,7 +20,7 @@ component SynchronousRam<T, ADDRESS, CAPACITY: int = 64, STYLE: MemoryStyle = Me
 	response: T
 
 	// Payload has no reset or promised power-up value.
-	@Memory(Style=STYLE)
+	@Memory(Style = STYLE)
 	@UninitializedStorage
 	storage: T[CAPACITY]
 

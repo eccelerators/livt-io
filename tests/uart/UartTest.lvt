@@ -2,33 +2,51 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Exercises Uart with a shared fixture instance. Each scenario establishes the inputs and
+ * state it needs.
+ */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component UartTest
 {
 	// Independent reference timing for the default 100 MHz/115200-baud regression.
 	const DEFAULT_TICKS_PER_BIT: int = 868
 
+	// Shared fixture instances, signals, and observation state.
 	uart: Uart
 
+	// Shared fixture instances, signals, and observation state.
 	rx: logic
 
+	// Shared fixture instances, signals, and observation state.
 	tx: logic
 
+	// Shared fixture instances, signals, and observation state.
 	tx_dv: logic
 
+	// Shared fixture instances, signals, and observation state.
 	tx_byte: byte
 
+	// Shared fixture instances, signals, and observation state.
 	tx_active: logic
 
+	// Shared fixture instances, signals, and observation state.
 	tx_done: logic
 
+	// Shared fixture instances, signals, and observation state.
 	rx_dv: logic
 
+	// Shared fixture instances, signals, and observation state.
 	rx_byte: byte
 
+	// Shared fixture instances, signals, and observation state.
 	rx_frame_error: logic
 
+	/**
+	 * Creates the shared fixture instances (Uart). Tests initialize the state required by
+	 * their scenario.
+	 */
 	new()
 	{
 		this.rx = 0b1
@@ -45,6 +63,9 @@ component UartTest
 		)
 	}
 
+	/**
+	 * Checks the transmit data case.
+	 */
 	@Test
 	fn TestTransmitData()
 	{
@@ -62,6 +83,7 @@ component UartTest
 
 		// Check for tx_done pulse
 		var done_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT; i = i++) {
 				if (this.tx_done == 0b1) {
@@ -69,6 +91,7 @@ component UartTest
 				}
 			}
 		}
+
 		assert done_seen == 0b1
 
 		// Should be back to idle
@@ -76,6 +99,9 @@ component UartTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the receive data case.
+	 */
 	@Test
 	fn TestReceiveData()
 	{
@@ -108,6 +134,7 @@ component UartTest
 
 		// Check for rx_dv pulse and received data
 		var dv_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT; i = i + 1) {
 				if (this.rx_dv == 0b1) {
@@ -115,6 +142,7 @@ component UartTest
 				}
 			}
 		}
+
 		assert dv_seen == 0b1
 		assert this.rx_byte == 0x55
 
@@ -123,6 +151,9 @@ component UartTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the invalid stop bit raises frame error case.
+	 */
 	@Test
 	fn TestInvalidStopBitRaisesFrameError()
 	{
@@ -154,11 +185,13 @@ component UartTest
 
 		var frame_error_seen = 0b0
 		var dv_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT * 2; i = i + 1) {
 				if (this.rx_frame_error == 0b1) {
 					frame_error_seen = 0b1
 				}
+
 				if (this.rx_dv == 0b1) {
 					dv_seen = 0b1
 				}
@@ -173,6 +206,9 @@ component UartTest
 		assert this.rx_frame_error == 0b0
 	}
 
+	/**
+	 * Checks the loopback case.
+	 */
 	@Test
 	fn TestLoopback()
 	{
@@ -215,6 +251,9 @@ component UartTest
 		Simulation.Wait(10)
 	}
 
+	/**
+	 * Checks the transmit multiple bytes case.
+	 */
 	@Test
 	fn TestTransmitMultipleBytes()
 	{
@@ -241,6 +280,9 @@ component UartTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the receive multiple bytes case.
+	 */
 	@Test
 	fn TestReceiveMultipleBytes()
 	{
@@ -306,6 +348,9 @@ component UartTest
 		Simulation.Wait(10)
 	}
 
+	/**
+	 * Checks the idle state case.
+	 */
 	@Test
 	fn TestIdleState()
 	{

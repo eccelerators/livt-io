@@ -6,11 +6,11 @@ namespace Livt.IO
  * supplies a synthesis hint; it never changes the asynchronous read contract.
  * ADDRESS must represent every index as an unsigned value of at most 32 bits.
  */
-component AsynchronousRam<T, ADDRESS, CAPACITY: int = 64, STYLE: MemoryStyle = MemoryStyle.Auto>
-	: IAsynchronousRam<T, ADDRESS, RamGeometry<CAPACITY>>
+component AsynchronousRam<T, ADDRESS, CAPACITY: int = 64, STYLE: MemoryStyle = MemoryStyle.Auto> : IAsynchronousRam<T, ADDRESS, RamGeometry<CAPACITY>>
 {
 	// Narrow unsigned address geometry, including capacity one.
 	public const ADDRESS_BITS: int = Bits.RequiredFor(CAPACITY - 1)
+
 	static assert CAPACITY > 0, "RAM capacity must be positive"
 
 	// Combinational write command, sampled together with the live read address.
@@ -18,7 +18,7 @@ component AsynchronousRam<T, ADDRESS, CAPACITY: int = 64, STYLE: MemoryStyle = M
 	writePayload: T
 
 	// Single-owner payload; no whole-array reset or initialization circuitry.
-	@Memory(Style=STYLE)
+	@Memory(Style = STYLE)
 	@UninitializedStorage
 	storage: T[CAPACITY]
 

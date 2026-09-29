@@ -2,25 +2,39 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Exercises UartTransmitter with a shared fixture instance. Each scenario establishes the
+ * inputs and state it needs.
+ */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component UartTransmitterTest
 {
 	// Independent reference timing for the default 100 MHz/115200-baud regression.
 	const DEFAULT_TICKS_PER_BIT: int = 868
 
+	// Shared fixture instances, signals, and observation state.
 	transmitter: UartTransmitter
 
+	// Shared fixture instances, signals, and observation state.
 	tx: logic
 
+	// Shared fixture instances, signals, and observation state.
 	tx_dv: logic
 
+	// Shared fixture instances, signals, and observation state.
 	tx_byte: byte
 
+	// Shared fixture instances, signals, and observation state.
 	tx_active: logic
 
+	// Shared fixture instances, signals, and observation state.
 	tx_done: logic
 
+	/**
+	 * Creates the shared fixture instances (UartTransmitter). Tests initialize the state
+	 * required by their scenario.
+	 */
 	new()
 	{
 		this.transmitter = new UartTransmitter(
@@ -32,6 +46,9 @@ component UartTransmitterTest
 		)
 	}
 
+	/**
+	 * Checks the transmitter case.
+	 */
 	@Test
 	fn TestTransmitter()
 	{
@@ -48,6 +65,9 @@ component UartTransmitterTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the idle state case.
+	 */
 	@Test
 	fn TestIdleState()
 	{
@@ -63,6 +83,9 @@ component UartTransmitterTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the start bit case.
+	 */
 	@Test
 	fn TestStartBit()
 	{
@@ -85,6 +108,9 @@ component UartTransmitterTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the data bits transmission case.
+	 */
 	@Test
 	fn TestDataBitsTransmission()
 	{
@@ -128,6 +154,9 @@ component UartTransmitterTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the stop bit case.
+	 */
 	@Test
 	fn TestStopBit()
 	{
@@ -149,6 +178,9 @@ component UartTransmitterTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the tx done signal case.
+	 */
 	@Test
 	fn TestTxDoneSignal()
 	{
@@ -163,6 +195,7 @@ component UartTransmitterTest
 		// Poll for tx_done signal in a window around expected completion
 		// Transmission takes: 1 start + 8 data + 1 stop = 10 bit periods
 		var done_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT * 6; i = i++) {
 				if (this.tx_done == 0b1) {
@@ -182,6 +215,9 @@ component UartTransmitterTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the tx active signal case.
+	 */
 	@Test
 	fn TestTxActiveSignal()
 	{
@@ -208,6 +244,9 @@ component UartTransmitterTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the multiple bytes case.
+	 */
 	@Test
 	fn TestMultipleBytes()
 	{
@@ -236,6 +275,9 @@ component UartTransmitterTest
 		assert this.tx == 0b1 // Back to idle
 	}
 
+	/**
+	 * Checks the all zeros case.
+	 */
 	@Test
 	fn TestAllZeros()
 	{
@@ -263,6 +305,9 @@ component UartTransmitterTest
 		assert this.tx_active == 0b0
 	}
 
+	/**
+	 * Checks the all ones case.
+	 */
 	@Test
 	fn TestAllOnes()
 	{

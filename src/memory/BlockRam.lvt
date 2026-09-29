@@ -5,4 +5,6 @@ namespace Livt.IO
  * Uses synchronous storage internally; methods complete over multiple cycles.
  * The synthesis tool makes the final physical mapping decision.
  */
-component BlockRam<T, CAPACITY: int = 2048> : Ram<T, CAPACITY, MemoryStyle.Block> {}
+component BlockRam<T, CAPACITY: int = 2048> : Ram<T, CAPACITY, MemoryStyle.Block>
+{
+}

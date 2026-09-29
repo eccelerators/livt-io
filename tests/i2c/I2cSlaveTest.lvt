@@ -2,17 +2,29 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Test bus adapter that exposes observed line levels and low-drive requests without
+ * physical board pins.
+ */
 component I2CSlaveTestBus : I2CBus
 {
+	// Shared fixture instances, signals, and observation state.
 	observed_scl: logic
 	observed_sda: logic
 
+	/**
+	 * Initializes fixture state and constructor bindings. Test cases share the fixture
+	 * instance rather than constructing a fresh subject for each method.
+	 */
 	new()
 	{
 		this.observed_scl = 0b1
 		this.observed_sda = 0b1
 	}
 
+	/**
+	 * Publishes the fixture SCL/SDA levels in the test clock context.
+	 */
 	process ApplyObservedLines()
 	{
 		state {
@@ -21,6 +33,9 @@ component I2CSlaveTestBus : I2CBus
 		}
 	}
 
+	/**
+	 * Sets the SCL/SDA levels that the fixture will present to the component under test.
+	 */
 	public fn SetObservedLines(sclValue: logic, sdaValue: logic)
 	{
 		state {
@@ -29,30 +44,48 @@ component I2CSlaveTestBus : I2CBus
 		}
 	}
 
+	/**
+	 * Returns the observed SDA low-drive request without changing the bus.
+	 */
 	public fn ReadSdaDriveLow() logic
 	{
 		return this.sda_drive_low
 	}
 }
 
+/**
+ * Exercises I2CSlave with a shared fixture instance. Each scenario establishes the inputs
+ * and state it needs.
+ */
 @Test
 component I2CSlaveTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: I2CSlaveTestBus
 	slave: I2CSlave
 
+	/**
+	 * Creates the shared fixture instances (I2CSlaveTestBus, I2CSlave). Tests initialize the
+	 * state required by their scenario.
+	 */
 	new()
 	{
 		this.bus = new I2CSlaveTestBus()
 		this.slave = new I2CSlave(this.bus, 0x42)
 	}
 
+	/**
+	 * Sets fixture bus levels and waits 40 simulation cycles for target edge detection.
+	 */
 	fn DriveLines(sclValue: logic, sdaValue: logic)
 	{
 		this.bus.SetObservedLines(sclValue, sdaValue)
 		Simulation.Wait(40)
 	}
 
+	/**
+	 * Drives a START transition and leaves SCL low for the next fixture bit.
+	 */
 	fn SendStart()
 	{
 		this.DriveLines(0b1, 0b1)
@@ -60,6 +93,9 @@ component I2CSlaveTest
 		this.DriveLines(0b0, 0b0)
 	}
 
+	/**
+	 * Drives a STOP transition and leaves both fixture lines released high.
+	 */
 	fn SendStop()
 	{
 		this.DriveLines(0b0, 0b0)
@@ -67,6 +103,9 @@ component I2CSlaveTest
 		this.DriveLines(0b1, 0b1)
 	}
 
+	/**
+	 * Clocks one supplied SDA level through low, high, and low SCL phases.
+	 */
 	fn ClockBit(value: logic)
 	{
 		this.DriveLines(0b0, value)
@@ -74,12 +113,17 @@ component I2CSlaveTest
 		this.DriveLines(0b0, value)
 	}
 
+	/**
+	 * Clocks eight bits most-significant first. The acknowledgment phase is driven separately.
+	 */
 	fn SendByte(value: byte)
 	{
 		var byteValue: int = value as int
+
 		for (var i = 0; i < 8; i++) {
 			var shiftAmount: int = 7 - i
 			var bitValue: int = (byteValue >> shiftAmount) & 1
+
 			if (bitValue == 0) {
 				this.ClockBit(0b0)
 			} else {
@@ -88,6 +132,9 @@ component I2CSlaveTest
 		}
 	}
 
+	/**
+	 * Clocks the target acknowledgment phase with the controller SDA level released.
+	 */
 	fn ClockSlaveAck()
 	{
 		this.DriveLines(0b0, 0b1)
@@ -95,6 +142,9 @@ component I2CSlaveTest
 		this.DriveLines(0b0, 0b1)
 	}
 
+	/**
+	 * Clocks controller ACK when ack is true, otherwise NACK, after a received byte.
+	 */
 	fn ClockMasterAck(ack: bool)
 	{
 		if (ack) {
@@ -108,6 +158,10 @@ component I2CSlaveTest
 		}
 	}
 
+	/**
+	 * Clocks eight read bits with the controller SDA level released; acknowledgment is
+	 * separate.
+	 */
 	fn ClockReadByte()
 	{
 		for (var i = 0; i < 8; i++) {
@@ -115,6 +169,9 @@ component I2CSlaveTest
 		}
 	}
 
+	/**
+	 * Clears all retained target notifications before the next event scenario.
+	 */
 	fn ClearEvents()
 	{
 		this.slave.ClearAddressMatch()
@@ -124,6 +181,9 @@ component I2CSlaveTest
 		this.slave.ClearTransmittedByte()
 	}
 
+	/**
+	 * Checks the initial event state case.
+	 */
 	@Test
 	fn TestInitialEventState()
 	{
@@ -137,6 +197,9 @@ component I2CSlaveTest
 		assert this.slave.HasTransmittedByte() == false
 	}
 
+	/**
+	 * Checks the address match write direction case.
+	 */
 	@Test
 	fn TestAddressMatchWriteDirection()
 	{
@@ -157,6 +220,9 @@ component I2CSlaveTest
 		this.SendStop()
 	}
 
+	/**
+	 * Checks the address match read direction case.
+	 */
 	@Test
 	fn TestAddressMatchReadDirection()
 	{
@@ -175,6 +241,9 @@ component I2CSlaveTest
 		this.ClockMasterAck(false)
 	}
 
+	/**
+	 * Checks the address miss does not ack case.
+	 */
 	@Test
 	fn TestAddressMissDoesNotAck()
 	{
@@ -189,6 +258,9 @@ component I2CSlaveTest
 		this.SendStop()
 	}
 
+	/**
+	 * Checks that Write receive byte.
+	 */
 	@Test
 	fn TestWriteReceiveByte()
 	{
@@ -209,6 +281,9 @@ component I2CSlaveTest
 		this.SendStop()
 	}
 
+	/**
+	 * Checks that Read transmit ack and nack events.
+	 */
 	@Test
 	fn TestReadTransmitAckAndNackEvents()
 	{
@@ -236,6 +311,9 @@ component I2CSlaveTest
 		assert this.slave.WasTransmitAcked() == false
 	}
 
+	/**
+	 * Checks the stop detected case.
+	 */
 	@Test
 	fn TestStopDetected()
 	{
@@ -252,6 +330,9 @@ component I2CSlaveTest
 		assert this.slave.HasStopDetected() == false
 	}
 
+	/**
+	 * Checks the repeated start returns to address bits case.
+	 */
 	@Test
 	fn TestRepeatedStartReturnsToAddressBits()
 	{

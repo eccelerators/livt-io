@@ -14,11 +14,19 @@ component I2CBusCombiner
 	public scl_drive_low: logic
 	public sda_drive_low: logic
 
+	/**
+	 * Borrows the upstream bus and exposes two logical device attachments. Each attachment
+	 * requests low drive or releases the line.
+	 */
 	new(upstream: flip I2CBus)
 	{
 		this.upstream = upstream
 	}
 
+	/**
+	 * Continuously combines low-drive requests and returns observed line levels to both
+	 * attachments; either device pulling low dominates the released state.
+	 */
 	process Combine[]()
 	{
 		var observedScl: logic = this.upstream.scl

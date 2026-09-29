@@ -5,12 +5,12 @@ namespace Livt.IO
  * Cells survive reset; unwritten contents are unspecified. Use SynchronousRam
  * directly when a one-command-per-clock datapath is needed.
  */
-component Ram<T, CAPACITY: int = 64, STYLE: MemoryStyle = MemoryStyle.Auto>
-	: IRam<T>
+component Ram<T, CAPACITY: int = 64, STYLE: MemoryStyle = MemoryStyle.Auto> : IRam<T>
 {
 	// Element geometry; capacity counts T values rather than bytes.
 	public const ADDRESS_WIDTH: int = Bits.RequiredFor(CAPACITY - 1)
 	public const MAX_ADDRESS: int = CAPACITY - 1
+
 	static assert CAPACITY > 0, "RAM capacity must be positive"
 
 	// One portable payload store and one scheduled transaction owner.

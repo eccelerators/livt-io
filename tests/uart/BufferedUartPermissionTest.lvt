@@ -6,9 +6,10 @@ using Livt.IO
  * Checks launch permission with a gated loopback and non-power-of-two FIFOs.
  */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component BufferedUartPermissionTest
 {
+	// Shared fixture instances, signals, and observation state.
 	buffered: BufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
 	wire: logic
 	permission: bool
@@ -16,10 +17,13 @@ component BufferedUartPermissionTest
 	/**
 	 * Starts with launch blocked so queued and physical status differ.
 	 */
-	new() { this.buffered = new BufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>(wire, wire, launchPermission = permission) }
+	new()
+	{
+		this.buffered = new BufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>(wire, wire, launchPermission = permission)
+	}
 
 	/**
-	 * Checks full rejection, pending status, wire loopback and cleared data.
+	 * Checks the gated loopback case.
 	 */
 	@Test
 	fn TestGatedLoopback()
@@ -53,7 +57,7 @@ component BufferedUartPermissionTest
 	}
 
 	/**
-	 * Checks overflow reporting and recovery without truncating accepted bytes.
+	 * Checks the receive overflow and clear case.
 	 */
 	@Test
 	fn TestReceiveOverflowAndClear()

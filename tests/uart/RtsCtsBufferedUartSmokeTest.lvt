@@ -2,19 +2,29 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Exercises RtsCtsBufferedUartSmoke with a shared fixture instance. Each scenario
+ * establishes the inputs and state it needs.
+ */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component RtsCtsBufferedUartSmokeTest
 {
 	// Independent 100 MHz/1 Mbaud timing keeps behavioral regressions short.
 	const TICKS_PER_BIT: int = 100
 
+	// Shared fixture instances, signals, and observation state.
 	uart: RtsCtsBufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>
 
+	// Shared fixture instances, signals, and observation state.
 	loopback_line: logic = 0b1
 	cts_n: logic = 0b1
 	rts_n: logic
 
+	/**
+	 * Creates the shared fixture instances (RtsCtsBufferedUart). Tests initialize the state
+	 * required by their scenario.
+	 */
 	new()
 	{
 		this.uart = new RtsCtsBufferedUart<64, 64, UartDataBits.Eight, UartParity.None, UartStopBits.One, 1MHz>(
@@ -24,6 +34,9 @@ component RtsCtsBufferedUartSmokeTest
 			this.rts_n)
 	}
 
+	/**
+	 * Checks that Send waits for cts.
+	 */
 	@Test
 	fn TestSendWaitsForCts()
 	{

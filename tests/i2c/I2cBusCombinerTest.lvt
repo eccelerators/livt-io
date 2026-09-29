@@ -2,17 +2,29 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Test bus adapter that exposes observed line levels and low-drive requests without
+ * physical board pins.
+ */
 component TestI2CBusProvider : I2CBus
 {
+	// Shared fixture instances, signals, and observation state.
 	observed_scl: logic
 	observed_sda: logic
 
+	/**
+	 * Initializes fixture state and constructor bindings. Test cases share the fixture
+	 * instance rather than constructing a fresh subject for each method.
+	 */
 	new()
 	{
 		this.observed_scl = 0b1
 		this.observed_sda = 0b1
 	}
 
+	/**
+	 * Publishes the fixture SCL/SDA levels in the test clock context.
+	 */
 	process ApplyObservedLines()
 	{
 		state {
@@ -21,6 +33,9 @@ component TestI2CBusProvider : I2CBus
 		}
 	}
 
+	/**
+	 * Sets the SCL/SDA levels that the fixture will present to the component under test.
+	 */
 	public fn SetObservedLines(sclValue: logic, sdaValue: logic)
 	{
 		state {
@@ -29,23 +44,38 @@ component TestI2CBusProvider : I2CBus
 		}
 	}
 
+	/**
+	 * Returns the observed SCL low-drive request without changing the bus.
+	 */
 	public fn ReadSclDriveLow() logic
 	{
 		return this.scl_drive_low
 	}
 
+	/**
+	 * Returns the observed SDA low-drive request without changing the bus.
+	 */
 	public fn ReadSdaDriveLow() logic
 	{
 		return this.sda_drive_low
 	}
 }
 
+/**
+ * Test bus adapter that exposes observed line levels and low-drive requests without
+ * physical board pins.
+ */
 component AttachmentProbe
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: I2CBus
 	scl_drive_low: logic
 	sda_drive_low: logic
 
+	/**
+	 * Initializes fixture state and constructor bindings. Test cases share the fixture
+	 * instance rather than constructing a fresh subject for each method.
+	 */
 	new(bus: flip I2CBus)
 	{
 		this.bus = bus
@@ -53,6 +83,10 @@ component AttachmentProbe
 		this.sda_drive_low = 0b0
 	}
 
+	/**
+	 * Copies the requested low-drive flags to the borrowed bus attachment in the test clock
+	 * context.
+	 */
 	process ApplyDrive()
 	{
 		state {
@@ -61,6 +95,10 @@ component AttachmentProbe
 		}
 	}
 
+	/**
+	 * Sets both fixture low-drive requests together; the drive process forwards them to the
+	 * attachment.
+	 */
 	public fn SetDrive(sclLow: logic, sdaLow: logic)
 	{
 		state {
@@ -69,25 +107,40 @@ component AttachmentProbe
 		}
 	}
 
+	/**
+	 * Returns the logical SCL level observed at the borrowed attachment.
+	 */
 	public fn ReadScl() logic
 	{
 		return this.bus.scl
 	}
 
+	/**
+	 * Returns the logical SDA level observed at the borrowed attachment.
+	 */
 	public fn ReadSda() logic
 	{
 		return this.bus.sda
 	}
 }
 
+/**
+ * Exercises I2CBusCombiner with a shared fixture instance. Each scenario establishes the
+ * inputs and state it needs.
+ */
 @Test
 component I2CBusCombinerTest
 {
+	// Shared fixture instances, signals, and observation state.
 	root: TestI2CBusProvider
 	controller: AttachmentProbe
 	target: AttachmentProbe
 	combiner: I2CBusCombiner
 
+	/**
+	 * Creates the shared fixture instances (TestI2CBusProvider, I2CBusCombiner,
+	 * AttachmentProbe). Tests initialize the state required by their scenario.
+	 */
 	new()
 	{
 		this.root = new TestI2CBusProvider()
@@ -96,6 +149,9 @@ component I2CBusCombinerTest
 		this.target = new AttachmentProbe(this.combiner.target)
 	}
 
+	/**
+	 * Checks the released devices release upstream case.
+	 */
 	@Test
 	fn TestReleasedDevicesReleaseUpstream()
 	{
@@ -108,6 +164,9 @@ component I2CBusCombinerTest
 		assert this.root.ReadSdaDriveLow() == 0b0
 	}
 
+	/**
+	 * Checks the either device can drive low case.
+	 */
 	@Test
 	fn TestEitherDeviceCanDriveLow()
 	{
@@ -120,6 +179,9 @@ component I2CBusCombinerTest
 		assert this.root.ReadSdaDriveLow() == 0b1
 	}
 
+	/**
+	 * Checks the observed lines propagate to both attachments case.
+	 */
 	@Test
 	fn TestObservedLinesPropagateToBothAttachments()
 	{

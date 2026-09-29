@@ -9,12 +9,20 @@ component I2COpenDrainPins : I2CBus
 	public physical_scl: inout logic
 	public physical_sda: inout logic
 
+	/**
+	 * Binds the physical bidirectional pins. The board must provide pull-ups for released
+	 * lines.
+	 */
 	new(physicalScl: inout logic, physicalSda: inout logic)
 	{
 		this.physical_scl = physicalScl
 		this.physical_sda = physicalSda
 	}
 
+	/**
+	 * Continuously drives zero for an asserted low request and high impedance otherwise. Reads
+	 * a physical zero as low and every other resolved value as high.
+	 */
 	process DrivePins[]()
 	{
 		if (this.scl_drive_low == 0b1) {

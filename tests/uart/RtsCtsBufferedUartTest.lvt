@@ -2,25 +2,36 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Exercises RtsCtsBufferedUart with a shared fixture instance. Each scenario establishes
+ * the inputs and state it needs.
+ */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component RtsCtsBufferedUartTest
 {
 	// Independent default-baud timing tolerates scheduled serial-stimulus overhead.
 	const TICKS_PER_BIT: int = 868
 
+	// Shared fixture instances, signals, and observation state.
 	controller: RtsCtsBufferedUart<3, 3>
 
+	// Shared fixture instances, signals, and observation state.
 	rx: logic = 0b1
 	tx: logic
 	cts_n: logic = 0b1
 	rts_n: logic
 
+	// Shared fixture instances, signals, and observation state.
 	loopback: RtsCtsBufferedUart<3, 3>
 	loopback_line: logic = 0b1
 	loopback_cts_n: logic = 0b1
 	loopback_rts_n: logic
 
+	/**
+	 * Creates the shared fixture instances (RtsCtsBufferedUart). Tests initialize the state
+	 * required by their scenario.
+	 */
 	new()
 	{
 		this.controller = new RtsCtsBufferedUart<3, 3, UartDataBits.Eight, UartParity.None, UartStopBits.One, 115200Hz>(
@@ -36,6 +47,9 @@ component RtsCtsBufferedUartTest
 			this.loopback_rts_n)
 	}
 
+	/**
+	 * Checks the cts pauses and resumes queued frames case.
+	 */
 	@Test
 	fn TestCtsPausesAndResumesQueuedFrames()
 	{
@@ -75,6 +89,9 @@ component RtsCtsBufferedUartTest
 		assert receivedByte2 == 0x34
 	}
 
+	/**
+	 * Checks the rts uses stop and resume watermarks case.
+	 */
 	@Test
 	fn TestRtsUsesStopAndResumeWatermarks()
 	{
@@ -105,6 +122,7 @@ component RtsCtsBufferedUartTest
 			var discardedByte3: byte
 			assert this.controller.TryReceive(discardedByte3) == true
 		}
+
 		Simulation.Wait(10)
 		assert this.controller.GetReceiveCount() == 1 + 1
 		assert this.rts_n == 0b1

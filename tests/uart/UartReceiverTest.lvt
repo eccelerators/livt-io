@@ -2,29 +2,45 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Exercises UartReceiver with a shared fixture instance. Each scenario establishes the
+ * inputs and state it needs.
+ */
 @Test
-@Context(ClockFrequency=100MHz)
+@Context(ClockFrequency = 100MHz)
 component UartReceiverTest
 {
 	// Independent reference timing for the default 100 MHz/115200-baud regression.
 	const DEFAULT_TICKS_PER_BIT: int = 868
 
-	receiver : UartReceiver
+	// Shared fixture instances, signals, and observation state.
+	receiver: UartReceiver
 
+	// Shared fixture instances, signals, and observation state.
 	rx: logic
 
+	// Shared fixture instances, signals, and observation state.
 	rx_dv: logic
 
+	// Shared fixture instances, signals, and observation state.
 	rx_byte: byte
 
+	// Shared fixture instances, signals, and observation state.
 	rx_frame_error: logic
 
+	/**
+	 * Creates the shared fixture instances (UartReceiver). Tests initialize the state required
+	 * by their scenario.
+	 */
 	new()
 	{
 		this.rx = 0b1
 		this.receiver = new UartReceiver(this.rx, this.rx_dv, this.rx_byte, this.rx_frame_error)
 	}
 
+	/**
+	 * Checks the receiver case.
+	 */
 	@Test
 	fn TestReceiver()
 	{
@@ -62,6 +78,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the idle state case.
+	 */
 	@Test
 	fn TestIdleState()
 	{
@@ -75,6 +94,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the start bit detection case.
+	 */
 	@Test
 	fn TestStartBitDetection()
 	{
@@ -93,10 +115,12 @@ component UartReceiverTest
 
 		// Complete a valid byte to avoid leaving receiver in bad state
 		Simulation.Wait(DEFAULT_TICKS_PER_BIT)
+
 		for (var i = 0; i < 8; i = i + 1) {
 			this.rx = 0b0
 			Simulation.Wait(DEFAULT_TICKS_PER_BIT)
 		}
+
 		this.rx = 0b1 // Stop bit
 		Simulation.Wait(DEFAULT_TICKS_PER_BIT * 2)
 		this.rx = 0b1
@@ -108,6 +132,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the false start rejection case.
+	 */
 	@Test
 	fn TestFalseStartRejection()
 	{
@@ -129,6 +156,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the data reception case.
+	 */
 	@Test
 	fn TestDataReception()
 	{
@@ -171,6 +201,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the rx dv signal case.
+	 */
 	@Test
 	fn TestRxDvSignal()
 	{
@@ -196,6 +229,7 @@ component UartReceiverTest
 		// After stop bit, rx_dv should pulse high
 		// Use polling to catch the pulse
 		var dv_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT; i = i++) {
 				if (this.rx_dv == 0b1) {
@@ -203,6 +237,7 @@ component UartReceiverTest
 				}
 			}
 		}
+
 		assert dv_seen == 0b1
 
 		// Wait for idle
@@ -213,6 +248,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the invalid stop bit triggers frame error case.
+	 */
 	@Test
 	fn TestInvalidStopBitTriggersFrameError()
 	{
@@ -244,11 +282,13 @@ component UartReceiverTest
 
 		var frame_error_seen = 0b0
 		var dv_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT * 2; i = i + 1) {
 				if (this.rx_frame_error == 0b1) {
 					frame_error_seen = 0b1
 				}
+
 				if (this.rx_dv == 0b1) {
 					dv_seen = 0b1
 				}
@@ -263,6 +303,9 @@ component UartReceiverTest
 		assert this.rx_frame_error == 0b0
 	}
 
+	/**
+	 * Checks the recovery after frame error case.
+	 */
 	@Test
 	fn TestRecoveryAfterFrameError()
 	{
@@ -272,13 +315,16 @@ component UartReceiverTest
 		// Send a malformed frame with an invalid stop bit.
 		this.rx = 0b0 // Start bit
 		Simulation.Wait(DEFAULT_TICKS_PER_BIT)
+
 		for (var i = 0; i < 8; i = i + 1) {
 			this.rx = 0b0
 			Simulation.Wait(DEFAULT_TICKS_PER_BIT)
 		}
+
 		this.rx = 0b0 // Invalid stop bit
 
 		var frame_error_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT * 2; i = i + 1) {
 				if (this.rx_frame_error == 0b1) {
@@ -286,6 +332,7 @@ component UartReceiverTest
 				}
 			}
 		}
+
 		assert frame_error_seen == 0b1
 
 		// Return to idle before sending the next valid frame.
@@ -314,6 +361,7 @@ component UartReceiverTest
 		this.rx = 0b1 // Stop bit
 
 		var dv_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT * 2; i = i + 1) {
 				if (this.rx_dv == 0b1) {
@@ -330,6 +378,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the multiple bytes case.
+	 */
 	@Test
 	fn TestMultipleBytes()
 	{
@@ -398,6 +449,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the all zeros case.
+	 */
 	@Test
 	fn TestAllZeros()
 	{
@@ -427,6 +481,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the all ones case.
+	 */
 	@Test
 	fn TestAllOnes()
 	{
@@ -456,6 +513,9 @@ component UartReceiverTest
 		assert this.rx_dv == 0b0
 	}
 
+	/**
+	 * Checks the stop bit validation case.
+	 */
 	@Test
 	fn TestStopBitValidation()
 	{
@@ -477,6 +537,7 @@ component UartReceiverTest
 
 		// Should have valid data
 		var dv_seen = 0b0
+
 		state {
 			for (var i = 0; i < DEFAULT_TICKS_PER_BIT; i = i++) {
 				if (this.rx_dv == 0b1) {
@@ -484,6 +545,7 @@ component UartReceiverTest
 				}
 			}
 		}
+
 		assert dv_seen == 0b1
 
 		// Return to idle

@@ -2,12 +2,21 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Test bus adapter that exposes observed line levels and low-drive requests without
+ * physical board pins.
+ */
 component OpenDrainProbe
 {
+	// Shared fixture instances, signals, and observation state.
 	busAdapter: I2CBus
 	scl_drive_low: logic
 	sda_drive_low: logic
 
+	/**
+	 * Initializes fixture state and constructor bindings. Test cases share the fixture
+	 * instance rather than constructing a fresh subject for each method.
+	 */
 	new(busAdapter: flip I2CBus)
 	{
 		this.busAdapter = busAdapter
@@ -15,6 +24,10 @@ component OpenDrainProbe
 		this.sda_drive_low = 0b0
 	}
 
+	/**
+	 * Copies the requested low-drive flags to the borrowed bus attachment in the test clock
+	 * context.
+	 */
 	process ApplyDrive()
 	{
 		state {
@@ -23,45 +36,72 @@ component OpenDrainProbe
 		}
 	}
 
+	/**
+	 * Requests an open-drain low on SCL through the fixture drive process.
+	 */
 	public fn DriveSclLow()
 	{
 		this.scl_drive_low = 0b1
 	}
 
+	/**
+	 * Releases the fixture SCL low-drive request.
+	 */
 	public fn ReleaseScl()
 	{
 		this.scl_drive_low = 0b0
 	}
 
+	/**
+	 * Requests an open-drain low on SDA through the fixture drive process.
+	 */
 	public fn DriveSdaLow()
 	{
 		this.sda_drive_low = 0b1
 	}
 
+	/**
+	 * Releases the fixture SDA low-drive request.
+	 */
 	public fn ReleaseSda()
 	{
 		this.sda_drive_low = 0b0
 	}
 
+	/**
+	 * Returns the logical SCL level observed at the borrowed attachment.
+	 */
 	public fn ReadScl() logic
 	{
 		return this.busAdapter.scl
 	}
 
+	/**
+	 * Returns the logical SDA level observed at the borrowed attachment.
+	 */
 	public fn ReadSda() logic
 	{
 		return this.busAdapter.sda
 	}
 }
 
+/**
+ * Exercises I2COpenDrainPins with a shared fixture instance. Each scenario establishes the
+ * inputs and state it needs.
+ */
 @Test
 component I2COpenDrainPinsTest
 {
+	// Shared fixture instances, signals, and observation state.
 	pins: I2COpenDrainPins
 	probe: OpenDrainProbe
 	scl: logic
 	sda: logic
 
+	/**
+	 * Creates the shared fixture instances (I2COpenDrainPins, OpenDrainProbe). Tests
+	 * initialize the state required by their scenario.
+	 */
 	new()
 	{
 		this.scl = 0bZ
@@ -70,6 +110,9 @@ component I2COpenDrainPinsTest
 		this.probe = new OpenDrainProbe(this.pins)
 	}
 
+	/**
+	 * Checks the released lines read high case.
+	 */
 	@Test
 	fn TestReleasedLinesReadHigh()
 	{
@@ -81,6 +124,9 @@ component I2COpenDrainPinsTest
 		assert this.probe.ReadSda() == 0b1
 	}
 
+	/**
+	 * Checks the drive low and release case.
+	 */
 	@Test
 	fn TestDriveLowAndRelease()
 	{

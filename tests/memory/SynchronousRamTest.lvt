@@ -59,32 +59,45 @@ component SynchronousRamTest
 			address = 0
 			data = 0x5A
 		}
+
 		Simulation.Wait(100)
+
 		state {
 			address = 2
 			data = 0xA5
 		}
+
 		Simulation.Wait(100)
+
 		state {
 			address = 3
 			data = 0xFF
 		}
+
 		Simulation.Wait(100)
+
 		state {
 			writeEnable = false
 			address = 0
 		}
+
 		Simulation.Wait(100)
 		Simulation.Wait(100)
 		assert memory.readData == 0x5A
-		state { address = 2 }
+
+		state {
+			address = 2
+		}
+
 		Simulation.Wait(100)
 		Simulation.Wait(100)
 		assert memory.readData == 0xA5
+
 		state {
 			enable = false
 			address = 0
 		}
+
 		Simulation.Wait(100)
 		Simulation.Wait(100)
 		assert memory.readData == 0xA5
@@ -102,8 +115,13 @@ component SynchronousRamTest
 			singleAddress = 0
 			singleData = 0x80000001
 		}
+
 		Simulation.Wait(100)
-		state { singleWriteEnable = false }
+
+		state {
+			singleWriteEnable = false
+		}
+
 		Simulation.Wait(100)
 		Simulation.Wait(100)
 		assert single.readData == 0x80000001

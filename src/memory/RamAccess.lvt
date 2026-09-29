@@ -10,8 +10,7 @@ namespace Livt.IO
  * The provider must be exclusively owned by this access adapter.
  */
 component RamAccess<T, ADDRESS, ELEMENT_COUNT: int,
-	STORAGE: ISynchronousRam<T, ADDRESS, RamGeometry<ELEMENT_COUNT>>>
-	: IRam<T>
+	STORAGE: ISynchronousRam<T, ADDRESS, RamGeometry<ELEMENT_COUNT>>> : IRam<T>
 {
 	// Compile-time element geometry, shared with the provider constraint.
 	static assert ELEMENT_COUNT > 0, "RAM capacity must be positive"
@@ -58,7 +57,9 @@ component RamAccess<T, ADDRESS, ELEMENT_COUNT: int,
 	 */
 	override fn Read(address: int) T
 	{
-		if (address < 0 || address >= ELEMENT_COUNT) { return 0 }
+		if (address < 0 || address >= ELEMENT_COUNT) {
+			return 0
+		}
 
 		state {
 			readAddress = address as ADDRESS
@@ -66,7 +67,8 @@ component RamAccess<T, ADDRESS, ELEMENT_COUNT: int,
 		}
 
 		while (readCompleted != readRequest) {
-			state {}
+			state {
+			}
 		}
 
 		return response
@@ -77,7 +79,9 @@ component RamAccess<T, ADDRESS, ELEMENT_COUNT: int,
 	 */
 	override fn Write(address: int, value: T)
 	{
-		if (address < 0 || address >= ELEMENT_COUNT) { return }
+		if (address < 0 || address >= ELEMENT_COUNT) {
+			return
+		}
 
 		state {
 			writeAddress = address as ADDRESS
@@ -86,7 +90,8 @@ component RamAccess<T, ADDRESS, ELEMENT_COUNT: int,
 		}
 
 		while (writeCompleted != writeRequest) {
-			state {}
+			state {
+			}
 		}
 	}
 
@@ -95,8 +100,7 @@ component RamAccess<T, ADDRESS, ELEMENT_COUNT: int,
 	 */
 	process Drive[]()
 	{
-		issueRead = !readInFlight && readRequest != readCompleted &&
-			(writeRequest == writeCompleted || lastWasWrite)
+		issueRead = !readInFlight && readRequest != readCompleted && (writeRequest == writeCompleted || lastWasWrite)
 		issueWrite = !readInFlight && writeRequest != writeCompleted && !issueRead
 		this.storage.enable = issueRead || issueWrite
 		this.storage.writeEnable = issueWrite

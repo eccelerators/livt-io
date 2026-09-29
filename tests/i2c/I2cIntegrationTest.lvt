@@ -2,14 +2,25 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Test bus adapter that exposes observed line levels and low-drive requests without
+ * physical board pins.
+ */
 component ResolvedI2CTestBus : I2CBus
 {
+	/**
+	 * Initializes fixture state and constructor bindings. Test cases share the fixture
+	 * instance rather than constructing a fresh subject for each method.
+	 */
 	new()
 	{
 		this.scl = 0b1
 		this.sda = 0b1
 	}
 
+	/**
+	 * Models pull-ups: a low-drive request resolves low and a released line resolves high.
+	 */
 	process ResolveLines()
 	{
 		state {
@@ -28,14 +39,23 @@ component ResolvedI2CTestBus : I2CBus
 	}
 }
 
+/**
+ * Exercises I2CIntegration with a shared fixture instance. Each scenario establishes the
+ * inputs and state it needs.
+ */
 @Test
 component I2CIntegrationTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: ResolvedI2CTestBus
 	combiner: I2CBusCombiner
 	master: I2CMaster
 	slave: I2CSlave
 
+	/**
+	 * Creates the shared fixture instances (ResolvedI2CTestBus, I2CBusCombiner, I2CMaster,
+	 * I2CSlave). Tests initialize the state required by their scenario.
+	 */
 	new()
 	{
 		this.bus = new ResolvedI2CTestBus()
@@ -44,11 +64,21 @@ component I2CIntegrationTest
 		this.slave = new I2CSlave(this.combiner.target, 0x42)
 	}
 
+	/**
+	 * Waits until the master is no longer busy; the test runner timeout bounds a stalled
+	 * command.
+	 */
 	fn WaitForCommand()
 	{
-		while (this.master.IsBusy()) { state {} }
+		while (this.master.IsBusy()) {
+			state {
+			}
+		}
 	}
 
+	/**
+	 * Asserts START acceptance, waits for completion, and clears the retained master result.
+	 */
 	fn RunStart()
 	{
 		var accepted: bool = this.master.BeginStart()
@@ -58,6 +88,9 @@ component I2CIntegrationTest
 		this.master.ClearResult()
 	}
 
+	/**
+	 * Asserts STOP acceptance, waits for completion, and clears the retained master result.
+	 */
 	fn RunStop()
 	{
 		var accepted: bool = this.master.BeginStop()
@@ -67,6 +100,10 @@ component I2CIntegrationTest
 		this.master.ClearResult()
 	}
 
+	/**
+	 * Sends a seven-bit write address, asserts acceptance/completion, and returns the ACK flag
+	 * before clearing status.
+	 */
 	fn RunWriteAddress(address: byte) bool
 	{
 		var accepted: bool = this.master.BeginWriteAddress(address)
@@ -78,6 +115,10 @@ component I2CIntegrationTest
 		return acked
 	}
 
+	/**
+	 * Sends a seven-bit read address, asserts acceptance/completion, and returns the ACK flag
+	 * before clearing status.
+	 */
 	fn RunReadAddress(address: byte) bool
 	{
 		var accepted: bool = this.master.BeginReadAddress(address)
@@ -89,6 +130,10 @@ component I2CIntegrationTest
 		return acked
 	}
 
+	/**
+	 * Sends one data byte, asserts acceptance/completion, and returns the ACK flag before
+	 * clearing status.
+	 */
 	fn RunWriteByte(value: byte) bool
 	{
 		var accepted: bool = this.master.BeginWriteByte(value)
@@ -100,6 +145,10 @@ component I2CIntegrationTest
 		return acked
 	}
 
+	/**
+	 * Receives one byte with the requested controller ACK/NACK, checks completion, and clears
+	 * status before returning the byte.
+	 */
 	fn RunReadByte(sendAck: bool) byte
 	{
 		var accepted: bool = this.master.BeginReadByte(sendAck)
@@ -111,6 +160,9 @@ component I2CIntegrationTest
 		return value
 	}
 
+	/**
+	 * Checks the master writes byte to slave case.
+	 */
 	@Test
 	fn TestMasterWritesByteToSlave()
 	{
@@ -130,17 +182,25 @@ component I2CIntegrationTest
 		assert this.slave.HasReceivedByte() == true
 		assert this.slave.GetReceivedByte() == 0xA5
 	}
-
 }
 
+/**
+ * Exercises I2CReadIntegration with a shared fixture instance. Each scenario establishes
+ * the inputs and state it needs.
+ */
 @Test
 component I2CReadIntegrationTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: ResolvedI2CTestBus
 	combiner: I2CBusCombiner
 	master: I2CMaster
 	slave: I2CSlave
 
+	/**
+	 * Creates the shared fixture instances (ResolvedI2CTestBus, I2CBusCombiner, I2CMaster,
+	 * I2CSlave). Tests initialize the state required by their scenario.
+	 */
 	new()
 	{
 		this.bus = new ResolvedI2CTestBus()
@@ -149,11 +209,21 @@ component I2CReadIntegrationTest
 		this.slave = new I2CSlave(this.combiner.target, 0x42)
 	}
 
+	/**
+	 * Waits until the master is no longer busy; the test runner timeout bounds a stalled
+	 * command.
+	 */
 	fn WaitForCommand()
 	{
-		while (this.master.IsBusy()) { state {} }
+		while (this.master.IsBusy()) {
+			state {
+			}
+		}
 	}
 
+	/**
+	 * Asserts START acceptance, waits for completion, and clears the retained master result.
+	 */
 	fn RunStart()
 	{
 		var accepted: bool = this.master.BeginStart()
@@ -163,6 +233,9 @@ component I2CReadIntegrationTest
 		this.master.ClearResult()
 	}
 
+	/**
+	 * Asserts STOP acceptance, waits for completion, and clears the retained master result.
+	 */
 	fn RunStop()
 	{
 		var accepted: bool = this.master.BeginStop()
@@ -172,6 +245,10 @@ component I2CReadIntegrationTest
 		this.master.ClearResult()
 	}
 
+	/**
+	 * Sends a seven-bit read address, asserts acceptance/completion, and returns the ACK flag
+	 * before clearing status.
+	 */
 	fn RunReadAddress(address: byte) bool
 	{
 		var accepted: bool = this.master.BeginReadAddress(address)
@@ -183,6 +260,10 @@ component I2CReadIntegrationTest
 		return acked
 	}
 
+	/**
+	 * Receives one byte with the requested controller ACK/NACK, checks completion, and clears
+	 * status before returning the byte.
+	 */
 	fn RunReadByte(sendAck: bool) byte
 	{
 		var accepted: bool = this.master.BeginReadByte(sendAck)
@@ -194,6 +275,9 @@ component I2CReadIntegrationTest
 		return value
 	}
 
+	/**
+	 * Checks the master reads byte from slave case.
+	 */
 	@Test
 	fn TestMasterReadsByteFromSlave()
 	{
@@ -216,14 +300,23 @@ component I2CReadIntegrationTest
 	}
 }
 
+/**
+ * Exercises I2CRegisterIntegration with a shared fixture instance. Each scenario
+ * establishes the inputs and state it needs.
+ */
 @Test
 component I2CRegisterIntegrationTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: ResolvedI2CTestBus
 	combiner: I2CBusCombiner
 	master: I2CMaster
 	registers: I2CRegisterSlave
 
+	/**
+	 * Creates the shared fixture instances (ResolvedI2CTestBus, I2CBusCombiner, I2CMaster,
+	 * I2CRegisterSlave). Tests initialize the state required by their scenario.
+	 */
 	new()
 	{
 		this.bus = new ResolvedI2CTestBus()
@@ -232,11 +325,21 @@ component I2CRegisterIntegrationTest
 		this.registers = new I2CRegisterSlave(this.combiner.target, 0x42)
 	}
 
+	/**
+	 * Waits until the master is no longer busy; the test runner timeout bounds a stalled
+	 * command.
+	 */
 	fn WaitForCommand()
 	{
-		while (this.master.IsBusy()) { state {} }
+		while (this.master.IsBusy()) {
+			state {
+			}
+		}
 	}
 
+	/**
+	 * Asserts START acceptance, waits for completion, and clears the retained master result.
+	 */
 	fn RunStart()
 	{
 		var accepted: bool = this.master.BeginStart()
@@ -246,6 +349,9 @@ component I2CRegisterIntegrationTest
 		this.master.ClearResult()
 	}
 
+	/**
+	 * Asserts STOP acceptance, waits for completion, and clears the retained master result.
+	 */
 	fn RunStop()
 	{
 		var accepted: bool = this.master.BeginStop()
@@ -255,6 +361,10 @@ component I2CRegisterIntegrationTest
 		this.master.ClearResult()
 	}
 
+	/**
+	 * Sends a seven-bit write address, asserts acceptance/completion, and returns the ACK flag
+	 * before clearing status.
+	 */
 	fn RunWriteAddress(address: byte) bool
 	{
 		var accepted: bool = this.master.BeginWriteAddress(address)
@@ -266,6 +376,10 @@ component I2CRegisterIntegrationTest
 		return acked
 	}
 
+	/**
+	 * Sends a seven-bit read address, asserts acceptance/completion, and returns the ACK flag
+	 * before clearing status.
+	 */
 	fn RunReadAddress(address: byte) bool
 	{
 		var accepted: bool = this.master.BeginReadAddress(address)
@@ -277,6 +391,10 @@ component I2CRegisterIntegrationTest
 		return acked
 	}
 
+	/**
+	 * Sends one data byte, asserts acceptance/completion, and returns the ACK flag before
+	 * clearing status.
+	 */
 	fn RunWriteByte(value: byte) bool
 	{
 		var accepted: bool = this.master.BeginWriteByte(value)
@@ -288,6 +406,10 @@ component I2CRegisterIntegrationTest
 		return acked
 	}
 
+	/**
+	 * Receives one byte with the requested controller ACK/NACK, checks completion, and clears
+	 * status before returning the byte.
+	 */
 	fn RunReadByte(sendAck: bool) byte
 	{
 		var accepted: bool = this.master.BeginReadByte(sendAck)
@@ -299,6 +421,9 @@ component I2CRegisterIntegrationTest
 		return value
 	}
 
+	/**
+	 * Checks the master writes then reads register case.
+	 */
 	@Test
 	fn TestMasterWritesThenReadsRegister()
 	{

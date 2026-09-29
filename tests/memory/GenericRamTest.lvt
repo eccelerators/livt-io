@@ -27,7 +27,7 @@ component GenericRamTest
 	}
 
 	/**
-	 * Checks both boundaries, invalid indices and independent cells.
+	 * Checks that the component preserves element bounds.
 	 */
 	@Test
 	fn PreservesElementBounds()
@@ -45,7 +45,7 @@ component GenericRamTest
 	}
 
 	/**
-	 * Checks a one-cell unsigned word without narrowing its high bit.
+	 * Checks that the component supports single cell.
 	 */
 	@Test
 	fn SupportsSingleCell()

@@ -6,12 +6,14 @@ using Livt.IO
  * Checks compile-time UART data-width, parity and stop-bit specialization.
  */
 @Test
-@Context(ClockFrequency=25MHz)
+@Context(ClockFrequency = 25MHz)
 component UartFrameConfigurationTest
 {
+	// Compile-time dimensions, bounds, and numeric constants.
 	const TICKS_PER_BIT: int = 25
 	const RECEIVER_TICKS_PER_BIT: int = 250
 
+	// Shared fixture instances, signals, and observation state.
 	fiveNoneTwo: LoopbackUart<64, 64, UartDataBits.Five, UartParity.None, UartStopBits.Two, 1MHz>
 	sevenEvenOne: LoopbackUart<64, 64, UartDataBits.Seven, UartParity.Even, UartStopBits.One, 1MHz>
 	eightOddTwo: LoopbackUart<64, 64, UartDataBits.Eight, UartParity.Odd, UartStopBits.Two, 1MHz>
@@ -109,10 +111,16 @@ component UartFrameConfigurationTest
 
 		// The wrong parity bit is high; leaving the line high also supplies the stop bit.
 		this.rx = 0b1 // Four data ones require an even-parity zero.
+
 		state {
 			for (var index = 0; index < RECEIVER_TICKS_PER_BIT * 2; index++) {
-				if (this.rxError == 0b1) { errorSeen = 0b1 }
-				if (this.rxValid == 0b1) { validSeen = 0b1 }
+				if (this.rxError == 0b1) {
+					errorSeen = 0b1
+				}
+
+				if (this.rxValid == 0b1) {
+					validSeen = 0b1
+				}
 			}
 		}
 

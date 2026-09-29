@@ -48,6 +48,10 @@ component I2CSlave
 	initialized: bool
 	busActive: bool
 
+	/**
+	 * Borrows the bus, masks address to seven bits, releases the lines, and clears event
+	 * state. Transmit data must be supplied before the controller reads it.
+	 */
 	new(bus: flip I2CBus, address: byte)
 	{
 		this.bus = bus
@@ -79,26 +83,45 @@ component I2CSlave
 		this.busActive = false
 	}
 
+	/**
+	 * Reports a retained receive event. This single-byte slot is not a queue; service it
+	 * before another byte arrives.
+	 */
 	public fn HasReceivedByte() bool
 	{
 		return this.byteReceived
 	}
 
+	/**
+	 * Returns the latest received byte without consuming its event; use HasReceivedByte to
+	 * check availability.
+	 */
 	public fn GetReceivedByte() byte
 	{
 		return this.receivedByte
 	}
 
+	/**
+	 * Clears the receive notification while retaining the last byte value.
+	 */
 	public fn ClearReceivedByte()
 	{
 		this.byteReceived = false
 	}
 
+	/**
+	 * Replaces the current outgoing byte. Supply it before the controller begins clocking that
+	 * byte.
+	 */
 	public fn SetTransmitByte(value: byte)
 	{
 		this.transmitByte = value
 	}
 
+	/**
+	 * Fills the one-byte prefetch slot promoted after a controller ACK. A later call replaces
+	 * any unconsumed prefetched value.
+	 */
 	public fn SetNextTransmitByte(value: byte)
 	{
 		state {
@@ -107,26 +130,44 @@ component I2CSlave
 		}
 	}
 
+	/**
+	 * Invalidates the prefetched byte without changing the current transmit byte.
+	 */
 	public fn ClearNextTransmitByte()
 	{
 		this.hasNextTransmitByte = false
 	}
 
+	/**
+	 * Reports the retained request for read data; service it and clear the event before
+	 * relying on a later request.
+	 */
 	public fn IsReadRequested() bool
 	{
 		return this.readRequested
 	}
 
+	/**
+	 * Clears the read-data request flag without changing transmit data.
+	 */
 	public fn ClearReadRequested()
 	{
 		this.readRequested = false
 	}
 
+	/**
+	 * Reports a retained matching-address event; inspect the direction flags before clearing
+	 * it.
+	 */
 	public fn HasAddressMatch() bool
 	{
 		return this.addressMatchEvent
 	}
 
+	/**
+	 * Clears the address event and both retained direction flags without aborting the bus
+	 * transaction.
+	 */
 	public fn ClearAddressMatch()
 	{
 		state {
@@ -136,36 +177,59 @@ component I2CSlave
 		}
 	}
 
+	/**
+	 * Reports the retained read-direction address notification; inspect with HasAddressMatch.
+	 */
 	public fn WasReadAddressed() bool
 	{
 		return this.readAddressed
 	}
 
+	/**
+	 * Reports the retained write-direction address notification; inspect with HasAddressMatch.
+	 */
 	public fn WasWriteAddressed() bool
 	{
 		return this.writeAddressed
 	}
 
+	/**
+	 * Reports a retained STOP event; reading does not clear it.
+	 */
 	public fn HasStopDetected() bool
 	{
 		return this.stopDetected
 	}
 
+	/**
+	 * Clears the retained STOP notification.
+	 */
 	public fn ClearStopDetected()
 	{
 		this.stopDetected = false
 	}
 
+	/**
+	 * Reports a retained byte-transmit completion; inspect WasTransmitAcked before clearing
+	 * it.
+	 */
 	public fn HasTransmittedByte() bool
 	{
 		return this.transmittedByte
 	}
 
+	/**
+	 * Returns the controller ACK status for the retained transmit completion; valid with
+	 * HasTransmittedByte.
+	 */
 	public fn WasTransmitAcked() bool
 	{
 		return this.transmitAcked
 	}
 
+	/**
+	 * Clears the transmit-completion event and its retained ACK flag.
+	 */
 	public fn ClearTransmittedByte()
 	{
 		state {
@@ -174,6 +238,11 @@ component I2CSlave
 		}
 	}
 
+	/**
+	 * Tracks bus edges, accepts matching address/data bytes, and transmits current/prefetched
+	 * bytes. Events are single retained slots; the caller must service them fast enough for
+	 * the bus rate.
+	 */
 	process Main()
 	{
 		var oldScl: logic = 0b1
@@ -244,8 +313,7 @@ component I2CSlave
 				this.ackLowSeen = false
 				this.readSdaDriveLow = 0b0
 				goto AddressBits
-			}
-			elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
+			} elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
 				this.stopDetected = true
 				this.busActive = false
 				this.bitCount = 0
@@ -255,29 +323,33 @@ component I2CSlave
 				this.ackLowSeen = false
 				this.readSdaDriveLow = 0b0
 				goto Idle
-			}
-			elif (oldScl == 0b0 && sclNow == 0b1) {
+			} elif (oldScl == 0b0 && sclNow == 0b1) {
 				nextShift = (this.shiftReg as int) << 1
+
 				if (sdaNow == 0b1) {
 					nextShift = nextShift | 1
 				}
+
 				this.shiftReg = nextShift as byte
 
 				if (this.bitCount == 7) {
 					matchedAddress = (nextShift >> 1) as byte
 					rwBit = nextShift & 1
 					this.bitCount = 0
+
 					if (matchedAddress == this.address) {
 						this.addressMatched = true
 						this.addressMatchEvent = true
 						readMode = (rwBit == 1)
 						this.isRead = readMode
+
 						if (readMode == true) {
 							this.readAddressed = true
 							this.readRequested = true
 						} else {
 							this.writeAddressed = true
 						}
+
 						this.ackHighSeen = false
 						this.ackLowSeen = false
 						goto AddressAck
@@ -296,6 +368,7 @@ component I2CSlave
 
 		state AddressAck {
 			this.bus.scl_drive_low = 0b0
+
 			if (this.ackLowSeen == true) {
 				this.bus.sda_drive_low = 0b1
 			} else {
@@ -316,10 +389,12 @@ component I2CSlave
 					this.bitCount = 0
 					this.ackHighSeen = false
 					this.ackLowSeen = false
+
 					if (readMode == true) {
 						byteValue = this.transmitByte as int
 						shiftAmount = 7 - this.bitCount
 						bitValue = (byteValue >> shiftAmount) & 1
+
 						if (bitValue == 0) {
 							this.readSdaDriveLow = 0b1
 							this.bus.sda_drive_low = 0b1
@@ -327,6 +402,7 @@ component I2CSlave
 							this.readSdaDriveLow = 0b0
 							this.bus.sda_drive_low = 0b0
 						}
+
 						goto ReadDataBits
 					} else {
 						goto WriteDataBits
@@ -336,11 +412,11 @@ component I2CSlave
 					this.bus.sda_drive_low = 0b1
 					goto AddressAck
 				}
-			}
-			elif (oldScl == 0b0 && sclNow == 0b1) {
+			} elif (oldScl == 0b0 && sclNow == 0b1) {
 				if (this.ackLowSeen == true) {
 					this.ackHighSeen = true
 				}
+
 				goto AddressAck
 			} else {
 				goto AddressAck
@@ -369,8 +445,7 @@ component I2CSlave
 				this.ackLowSeen = false
 				this.readSdaDriveLow = 0b0
 				goto AddressBits
-			}
-			elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
+			} elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
 				this.stopDetected = true
 				this.busActive = false
 				this.bitCount = 0
@@ -381,12 +456,13 @@ component I2CSlave
 				this.readSdaDriveLow = 0b0
 				readMode = false
 				goto Idle
-			}
-			elif (oldScl == 0b0 && sclNow == 0b1) {
+			} elif (oldScl == 0b0 && sclNow == 0b1) {
 				nextShift = (this.shiftReg as int) << 1
+
 				if (sdaNow == 0b1) {
 					nextShift = nextShift | 1
 				}
+
 				this.shiftReg = nextShift as byte
 
 				if (this.bitCount == 7) {
@@ -407,6 +483,7 @@ component I2CSlave
 
 		state WriteAck {
 			this.bus.scl_drive_low = 0b0
+
 			if (this.ackLowSeen == true) {
 				this.bus.sda_drive_low = 0b1
 			} else {
@@ -432,11 +509,11 @@ component I2CSlave
 					this.bus.sda_drive_low = 0b1
 					goto WriteAck
 				}
-			}
-			elif (oldScl == 0b0 && sclNow == 0b1) {
+			} elif (oldScl == 0b0 && sclNow == 0b1) {
 				if (this.ackLowSeen == true) {
 					this.ackHighSeen = true
 				}
+
 				goto WriteAck
 			} else {
 				goto WriteAck
@@ -466,8 +543,7 @@ component I2CSlave
 				this.readSdaDriveLow = 0b0
 				this.bus.sda_drive_low = 0b0
 				goto AddressBits
-			}
-			elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
+			} elif (oldSda == 0b0 && sdaNow == 0b1 && sclNow == 0b1 && this.busActive == true) {
 				this.stopDetected = true
 				this.busActive = false
 				this.bitCount = 0
@@ -479,11 +555,11 @@ component I2CSlave
 				this.bus.sda_drive_low = 0b0
 				readMode = false
 				goto Idle
-			}
-			elif (oldScl == 0b1 && sclNow == 0b0) {
+			} elif (oldScl == 0b1 && sclNow == 0b0) {
 				byteValue = this.transmitByte as int
 				shiftAmount = 7 - this.bitCount
 				bitValue = (byteValue >> shiftAmount) & 1
+
 				if (bitValue == 0) {
 					this.readSdaDriveLow = 0b1
 					this.bus.sda_drive_low = 0b1
@@ -491,9 +567,9 @@ component I2CSlave
 					this.readSdaDriveLow = 0b0
 					this.bus.sda_drive_low = 0b0
 				}
+
 				goto ReadDataBits
-			}
-			elif (oldScl == 0b0 && sclNow == 0b1) {
+			} elif (oldScl == 0b0 && sclNow == 0b1) {
 				if (this.bitCount == 7) {
 					this.bitCount = 0
 					goto ReadRelease
@@ -548,15 +624,16 @@ component I2CSlave
 				this.ackLowSeen = false
 				this.readSdaDriveLow = 0b0
 				goto AddressBits
-			}
-			elif (oldScl == 0b0 && sclNow == 0b1) {
+			} elif (oldScl == 0b0 && sclNow == 0b1) {
 				this.transmittedByte = true
 				this.transmitAcked = (sdaNow == 0b0)
+
 				if (sdaNow == 0b0) {
 					if (this.hasNextTransmitByte == true) {
 						this.transmitByte = this.nextTransmitByte
 						this.hasNextTransmitByte = false
 					}
+
 					this.bitCount = 0
 					this.readSdaDriveLow = 0b0
 					goto ReadDataBits
@@ -566,8 +643,7 @@ component I2CSlave
 					readMode = false
 					goto Idle
 				}
-			}
-			else {
+			} else {
 				goto ReadAck
 			}
 		}

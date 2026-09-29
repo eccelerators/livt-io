@@ -7,28 +7,40 @@ using Livt.IO
  */
 component SPIMasterTestBus : SPIBus
 {
+	// Compile-time dimensions, bounds, and numeric constants.
 	const MAX_CAPTURED_BYTES: int = 80
 
+	// Compile-time dimensions, bounds, and numeric constants.
 	const MAX_CLOCK_EDGES: int = 32
 
+	// Shared fixture instances, signals, and observation state.
 	responseByte: byte
 
+	// Shared fixture instances, signals, and observation state.
 	capturedByte: byte
 
+	// Shared fixture instances, signals, and observation state.
 	capturedBytes: byte[80]
 
+	// Shared fixture instances, signals, and observation state.
 	capturedByteCount: int
 
+	// Shared fixture instances, signals, and observation state.
 	risingEdges: int
 
+	// Shared fixture instances, signals, and observation state.
 	selectEdges: int
 
+	// Shared fixture instances, signals, and observation state.
 	deselectEdges: int
 
+	// Shared fixture instances, signals, and observation state.
 	clockEdgeIntervals: int[32]
 
+	// Shared fixture instances, signals, and observation state.
 	clockEdgeCount: int
 
+	// Shared fixture instances, signals, and observation state.
 	deselectHoldTicks: int
 
 	/**
@@ -76,7 +88,9 @@ component SPIMasterTestBus : SPIBus
 	 */
 	public fn GetCapturedByteAt(index: int) byte
 	{
-		if (index < 0 || index >= this.capturedByteCount) { return 0x00 }
+		if (index < 0 || index >= this.capturedByteCount) {
+			return 0x00
+		}
 
 		return this.capturedBytes[index]
 	}
@@ -135,7 +149,9 @@ component SPIMasterTestBus : SPIBus
 	 */
 	public fn GetClockEdgeInterval(index: int) int
 	{
-		if (index < 0 || index >= this.clockEdgeCount) { return 0 }
+		if (index < 0 || index >= this.clockEdgeCount) {
+			return 0
+		}
 
 		return this.clockEdgeIntervals[index]
 	}
@@ -208,7 +224,9 @@ component SPIMasterTestBus : SPIBus
 			if (this.chip_select_n == 0b0 && previousSclk == 0b0 && this.sclk == 0b1) {
 				capturedValue = capturedValue << 1
 
-				if (this.mosi == 0b1) { capturedValue = capturedValue + 1 }
+				if (this.mosi == 0b1) {
+					capturedValue = capturedValue + 1
+				}
 
 				capturedBits = capturedBits + 1
 				edgeCount = edgeCount + 1
@@ -246,8 +264,10 @@ component SPIMasterTestBus : SPIBus
 @Context(ClockFrequency = 100MHz)
 component SPIMasterTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: SPIMasterTestBus
 
+	// Shared fixture instances, signals, and observation state.
 	master: SPIMaster
 
 	/**
@@ -265,10 +285,12 @@ component SPIMasterTest
 	fn WaitForCommand()
 	{
 		while (this.master.IsBusy()) {
-			state {}
+			state {
+			}
 		}
 
-		state {}
+		state {
+		}
 	}
 
 	/**
@@ -455,8 +477,10 @@ component SPIMasterTest
 @Context(ClockFrequency = 50MHz)
 component SPIMasterSlowContextTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: SPIMasterTestBus
 
+	// Shared fixture instances, signals, and observation state.
 	master: SPIMaster
 
 	/**
@@ -474,10 +498,12 @@ component SPIMasterSlowContextTest
 	fn WaitForCommand()
 	{
 		while (this.master.IsBusy()) {
-			state {}
+			state {
+			}
 		}
 
-		state {}
+		state {
+		}
 	}
 
 	/**
@@ -511,8 +537,10 @@ component SPIMasterSlowContextTest
 @Context(ClockFrequency = 50MHz)
 component SPIMasterConfiguredTimingTest
 {
+	// Shared fixture instances, signals, and observation state.
 	bus: SPIMasterTestBus
 
+	// Shared fixture instances, signals, and observation state.
 	master: SPIMaster
 
 	/**
@@ -530,10 +558,12 @@ component SPIMasterConfiguredTimingTest
 	fn WaitForCommand()
 	{
 		while (this.master.IsBusy()) {
-			state {}
+			state {
+			}
 		}
 
-		state {}
+		state {
+		}
 	}
 
 	/**

@@ -6,14 +6,12 @@ using Livt.Collections
  * FIFO-backed application UART. The owner of each FIFO is its only mutator.
  * Launch permission gates a new frame, never an active or committed frame.
  */
-component BufferedUart<
-	RX_CAPACITY: int = 64,
+component BufferedUart<RX_CAPACITY: int = 64,
 	TX_CAPACITY: int = 64,
 	DATA_BITS: UartDataBits = UartDataBits.Eight,
 	PARITY: UartParity = UartParity.None,
 	STOP_BITS: UartStopBits = UartStopBits.One,
-	BAUD: Frequency = 115200Hz
-> : IBufferedUart
+	BAUD: Frequency = 115200Hz> : IBufferedUart
 {
 	// Signal-level UART and the two independently owned byte stores.
 	uart: Uart<DATA_BITS, PARITY, STOP_BITS, BAUD>
@@ -104,7 +102,10 @@ component BufferedUart<
 		txPayload = data
 		txRequest = !txRequest
 
-		while (txCompleted != txRequest) { state {} }
+		while (txCompleted != txRequest) {
+			state {
+			}
+		}
 
 		return txAccepted
 	}
@@ -118,7 +119,10 @@ component BufferedUart<
 		var accepted = 0
 
 		for (var index = 0; index < data.Length(); index++) {
-			if (!TryTransmit(data[index])) { return accepted }
+			if (!TryTransmit(data[index])) {
+				return accepted
+			}
+
 			accepted++
 		}
 
@@ -132,7 +136,10 @@ component BufferedUart<
 	{
 		rxRequest = !rxRequest
 
-		while (rxCompleted != rxRequest) { state {} }
+		while (rxCompleted != rxRequest) {
+			state {
+			}
+		}
 
 		data = rxResult
 		return rxAccepted
@@ -145,7 +152,10 @@ component BufferedUart<
 	{
 		txClearRequest = !txClearRequest
 
-		while (txClearCompleted != txClearRequest) { state {} }
+		while (txClearCompleted != txClearRequest) {
+			state {
+			}
+		}
 	}
 
 	/**
@@ -155,13 +165,19 @@ component BufferedUart<
 	{
 		rxClearRequest = !rxClearRequest
 
-		while (rxClearCompleted != rxClearRequest) { state {} }
+		while (rxClearCompleted != rxClearRequest) {
+			state {
+			}
+		}
 	}
 
 	/**
 	 * Reports an active physical transmit frame.
 	 */
-	override fn IsTransmitting() bool { return txActive == 0b1 }
+	override fn IsTransmitting() bool
+	{
+		return txActive == 0b1
+	}
 
 	/**
 	 * Includes queued, pending API, committed-launch and physically active work.
@@ -182,22 +198,34 @@ component BufferedUart<
 	/**
 	 * Returns a receive occupancy snapshot, not a reservation.
 	 */
-	override fn GetReceiveCount() int { return rxCount }
+	override fn GetReceiveCount() int
+	{
+		return rxCount
+	}
 
 	/**
 	 * Returns a transmit free-space snapshot, not a reservation.
 	 */
-	override fn GetTransmitSpace() int { return txSpace }
+	override fn GetTransmitSpace() int
+	{
+		return txSpace
+	}
 
 	/**
 	 * Returns the number of invalid parity or stop bits observed since error clear.
 	 */
-	override fn GetFrameErrorCount() int { return frameErrors }
+	override fn GetFrameErrorCount() int
+	{
+		return frameErrors
+	}
 
 	/**
 	 * Returns valid received frames rejected because the FIFO was full.
 	 */
-	override fn GetReceiveOverflowCount() int { return overflows }
+	override fn GetReceiveOverflowCount() int
+	{
+		return overflows
+	}
 
 	/**
 	 * Clears both error counters; clear wins over events on its edge.
@@ -206,7 +234,10 @@ component BufferedUart<
 	{
 		errorClearRequest = !errorClearRequest
 
-		while (errorClearCompleted != errorClearRequest) { state {} }
+		while (errorClearCompleted != errorClearRequest) {
+			state {
+			}
+		}
 	}
 
 	/**
@@ -270,8 +301,13 @@ component BufferedUart<
 				overflows = 0
 				errorClearCompleted = errorClearRequest
 			} else {
-				if (rxError == 0b1) { frameErrors++ }
-				if (rxPush && !rxPushAccepted) { overflows++ }
+				if (rxError == 0b1) {
+					frameErrors++
+				}
+
+				if (rxPush && !rxPushAccepted) {
+					overflows++
+				}
 			}
 
 			goto Tick

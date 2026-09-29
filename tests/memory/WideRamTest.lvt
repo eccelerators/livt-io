@@ -2,18 +2,30 @@ namespace Livt.IO.Tests
 
 using Livt.IO
 
+/**
+ * Exercises WideRam with a shared fixture instance. Each scenario establishes the inputs
+ * and state it needs.
+ */
 @Test
 component WideRamTest
 {
+	// Shared fixture instances, signals, and observation state.
 	ram16: Ram16
 	ram32: Ram32
 
+	/**
+	 * Creates the shared fixture instances (Ram16, Ram32). Tests initialize the state required
+	 * by their scenario.
+	 */
 	new()
 	{
 		ram16 = new Ram16()
 		ram32 = new Ram32()
 	}
 
+	/**
+	 * Checks that the component preserves signed bit patterns and boundaries.
+	 */
 	@Test
 	fn PreservesSignedBitPatternsAndBoundaries()
 	{
@@ -32,6 +44,9 @@ component WideRamTest
 		assert ram32.Read(2048) == 0
 	}
 
+	/**
+	 * Checks that the component supports repeated writes.
+	 */
 	@Test
 	fn SupportsRepeatedWrites()
 	{

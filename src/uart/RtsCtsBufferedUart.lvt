@@ -4,19 +4,18 @@ namespace Livt.IO
  * Active-low RTS/CTS UART with compile-time receive and transmit capacities.
  * Scheduled methods report transaction results; they are not single-cycle ports.
  */
-component RtsCtsBufferedUart<
-	RX_CAPACITY: int = 64,
+component RtsCtsBufferedUart<RX_CAPACITY: int = 64,
 	TX_CAPACITY: int = 64,
 	DATA_BITS: UartDataBits = UartDataBits.Eight,
 	PARITY: UartParity = UartParity.None,
 	STOP_BITS: UartStopBits = UartStopBits.One,
-	BAUD: Frequency = 115200Hz
-> : IBufferedUart by buffered
+	BAUD: Frequency = 115200Hz> : IBufferedUart by buffered
 {
 	// Reserve at least one receive slot; small FIFOs require prompt peer response.
 	const RTS_HEADROOM: int = (RX_CAPACITY + 7) / 8
 	const RTS_STOP_LEVEL: int = RX_CAPACITY - RTS_HEADROOM
 	const RTS_RESUME_LEVEL: int = RTS_STOP_LEVEL - RTS_HEADROOM
+
 	static assert RX_CAPACITY >= 2, "RTS/CTS receive capacity must be at least two"
 
 	// Scheduled UART implementation delegated through the common contract.
@@ -77,6 +76,7 @@ component RtsCtsBufferedUart<
 			} elif (receiveCount <= RTS_RESUME_LEVEL) {
 				rtsN = 0b0
 			}
+
 			goto Tick
 		}
 	}

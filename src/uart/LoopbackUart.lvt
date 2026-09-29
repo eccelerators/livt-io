@@ -4,14 +4,12 @@ namespace Livt.IO
  * Internally looped-back UART with compile-time receive and transmit capacities.
  * Scheduled methods report transaction results; they are not single-cycle ports.
  */
-component LoopbackUart<
-	RX_CAPACITY: int = 64,
+component LoopbackUart<RX_CAPACITY: int = 64,
 	TX_CAPACITY: int = 64,
 	DATA_BITS: UartDataBits = UartDataBits.Eight,
 	PARITY: UartParity = UartParity.None,
 	STOP_BITS: UartStopBits = UartStopBits.One,
-	BAUD: Frequency = 115200Hz
-> : IBufferedUart by buffered
+	BAUD: Frequency = 115200Hz> : IBufferedUart by buffered
 {
 	// Shared scheduled implementation and the serial wire joining TX to RX.
 	buffered: BufferedUart<RX_CAPACITY, TX_CAPACITY, DATA_BITS, PARITY, STOP_BITS, BAUD>

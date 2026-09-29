@@ -13,6 +13,8 @@ component RamBackendTest
 	custom: CustomRamBackend
 	portableAccess: RamAccess<logic[16], logic[2], 3,
 		SynchronousRam<logic[16], logic[2], 3, MemoryStyle.Block>>
+
+	// Shared fixture instances, signals, and observation state.
 	customAccess: RamAccess<logic[16], logic[2], 3, CustomRamBackend>
 
 	/**
