@@ -35,7 +35,7 @@ The 1.2.0 package surface is intentionally small and hardware-oriented:
 
 ```toml
 [dependencies]
-Livt.IO = "1.2.0-dev"
+Livt.IO = "1.2.0"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
@@ -163,7 +163,7 @@ compiler one common implementation contract. The wrappers delegate scheduled
 methods with `IBufferedUart by buffered`. Applications can hold an `IBufferedUart`
 reference when substitution is useful, or use a concrete component type directly.
 `Uart` remains available for custom unbuffered compositions. The shared FIFO
-dependency is declared in `livt.toml` as `Livt.Collections` version `1.1.0-dev`.
+dependency is declared in `livt.toml` as `Livt.Collections` version `1.1.0`.
 
 - `TryTransmit(data) bool` reports FIFO acceptance, not wire completion.
 - `TryReceive(data: out byte) bool` atomically removes a byte. Failure assigns
