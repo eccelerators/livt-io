@@ -7,6 +7,7 @@ outdir = "out"
 [tests]
 path = "tests"
 components = [
+    "EthernetCrcTest",
     "GenericRamTest",
     "RamBackendTest",
     "SynchronousRamTest",

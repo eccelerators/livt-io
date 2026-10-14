@@ -1,0 +1,36 @@
+namespace Livt.IO
+
+/**
+ * Scheduled complete-frame RX capability for one serialized application owner.
+ * Acquired bytes start at destination MAC, retain padding and exclude FCS.
+ * No partial capture is published. Calls do not promise one-cycle latency.
+ */
+public interface IEthernetReceiver
+{
+	/** Returns configured storage capacity in bytes, excluding FCS. */
+	fn GetReceiveCapacity() int
+
+	/** Reports published or acquired data; this snapshot grants no ownership. */
+	fn HasReceiveFrame() bool
+
+	/** Success acquires a frame; Busy means already acquired, NotReady no frame. */
+	fn TryAcquire() EthernetResult
+
+	/** Returns exact acquired length, or zero without an acquisition. */
+	fn GetReceiveLength() int
+
+	/** Success reads an acquired byte; Invalid assigns zero and changes nothing. */
+	fn TryRead(index: int, value: out byte) EthernetResult
+
+	/** Success releases acquired storage; Invalid means no acquisition. */
+	fn TryRelease() EthernetResult
+
+	/** Reports a sticky local capture failure, independently of valid frame data. */
+	fn HasReceiveError() bool
+
+	/** Success clears a capture failure; NotReady means none is pending. */
+	fn TryAcknowledgeReceiveError() EthernetResult
+
+	/** Returns the selected saturating discard counter since reset. */
+	fn GetDiscardCount(reason: EthernetReceiveDiscard) uint
+}

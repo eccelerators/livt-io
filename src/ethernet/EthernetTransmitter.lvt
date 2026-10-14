@@ -1,0 +1,220 @@
+namespace Livt.IO
+
+enum EthernetTxState
+{
+	Free
+	Filling
+	Preamble
+	Payload
+	Fcs
+	Drain
+	Aborting
+	Complete
+}
+
+/**
+ * One-slot buffered MAC transmitter. Only Tick owns RAM and frame lifecycle.
+ * Scheduled commands copy into the slot; wire progress never calls a method.
+ */
+component EthernetTransmitter<CAPACITY: int = 1514> : IEthernetTransmitter
+{
+	static assert CAPACITY >= 60 && CAPACITY <= 1514, "Ethernet capacity must be 60..1514"
+	media: IEthernetMedia
+	link: IEthernetLinkStatus
+	const ADDRESS_BITS: int = Bits.RequiredFor(CAPACITY - 1)
+	// Length/index include CAPACITY itself, unlike a RAM address.
+	const LENGTH_BITS: int = Bits.RequiredFor(CAPACITY)
+	ram: SynchronousRam<byte, logic[ADDRESS_BITS], CAPACITY, MemoryStyle.Block>
+	writePending: bool
+	writeAddress: logic[ADDRESS_BITS]
+	writeByte: byte
+	phase: EthernetTxState
+	length: logic[LENGTH_BITS]
+	filled: logic[LENGTH_BITS]
+	index: logic[LENGTH_BITS]
+	typeHigh: byte
+	typeLow: byte
+	crc: logic[32]
+	fcs: logic[32]
+	gap: logic[9]
+	frameSpeed: EthernetSpeed
+	outcome: EthernetTransmitOutcome
+	abortTicks: logic[2]
+
+	// One serialized API owner shares this command mailbox.
+	command: logic[3]
+	argument: int
+	request: bool
+	completed: bool
+	result: EthernetResult
+
+	new(media: flip IEthernetMedia, link: IEthernetLinkStatus)
+	{
+		assert this.context.ticksPerSecond == 50000000, "Ethernet requires a 50 MHz context"
+		this.ram = new SynchronousRam<byte, logic[ADDRESS_BITS], CAPACITY, MemoryStyle.Block>()
+		this.media = media
+		this.link = link
+	}
+
+	fn Execute(operation: int, value: int) EthernetResult
+	{
+		state {
+			command = operation as logic[3]
+			argument = value
+			request = !request
+		}
+		while (request != completed) { state {} }
+		return result
+	}
+
+	override fn GetTransmitCapacity() int { return CAPACITY }
+	override fn TryBegin(length: int) EthernetResult { return Execute(1, length) }
+	override fn TryAppend(value: byte) EthernetResult { return Execute(2, value as int) }
+	override fn TryCommit() EthernetResult { return Execute(3, 0) }
+	override fn TryDiscard() EthernetResult { return Execute(4, 0) }
+	override fn TryAcknowledgeCompletion() EthernetResult { return Execute(5, 0) }
+
+	override fn TryGetCompletion(outcome: out EthernetTransmitOutcome) EthernetResult
+	{
+		outcome = EthernetTransmitOutcome.None
+		if (phase != EthernetTxState.Complete) { return EthernetResult.NotReady }
+		outcome = this.outcome
+		return EthernetResult.Success
+	}
+
+	process Wire[]()
+	{
+		media.txValid = false
+		media.txFirst = false
+		media.txLast = false
+		media.txData = 0
+		media.txAbort = phase == EthernetTxState.Aborting
+		if (link.ready && link.speed == frameSpeed && gap == 0) {
+			if (phase == EthernetTxState.Preamble) {
+				media.txValid = true
+				media.txFirst = index == 0
+				media.txData = 0x55
+				if (index == 7) { media.txData = 0xD5 }
+			} elif (phase == EthernetTxState.Payload) {
+				media.txValid = true
+				if (index < length) { media.txData = ram.readData }
+			} elif (phase == EthernetTxState.Fcs) {
+				media.txValid = true
+				media.txData = (fcs & 0xFF) as byte
+				media.txLast = index == 3
+			}
+		}
+	}
+
+	process Tick()
+	{
+		state Run {
+			writePending = false
+			var typeSupported = EthernetCrc.SupportedType(typeHigh, typeLow)
+			if (gap > 0) { gap-- }
+			var transmitting = phase == EthernetTxState.Preamble || phase == EthernetTxState.Payload
+				|| phase == EthernetTxState.Fcs || phase == EthernetTxState.Drain
+			if (transmitting && (!link.ready || link.speed != frameSpeed || media.txFault)) {
+				outcome = EthernetTransmitOutcome.DeviceFailure
+				if (!link.ready || link.speed != frameSpeed) { outcome = EthernetTransmitOutcome.LinkLost }
+				phase = EthernetTxState.Aborting
+				abortTicks = 0
+			} elif (phase == EthernetTxState.Aborting) {
+				// Hold abort across two complete edges; adapter is then quiescent even if idle.
+				abortTicks++
+				if (abortTicks >= 2) {
+					phase = EthernetTxState.Complete
+					gap = 48
+					if (frameSpeed == EthernetSpeed.Mbps10) { gap = 480 }
+				}
+			} elif (phase == EthernetTxState.Drain && media.txDone) {
+				outcome = EthernetTransmitOutcome.Sent
+				phase = EthernetTxState.Complete
+				gap = 48
+				if (frameSpeed == EthernetSpeed.Mbps10) { gap = 480 }
+			} elif (media.txValid && media.txReady) {
+				if (phase == EthernetTxState.Preamble) {
+					if (index == 7) {
+						index = 0
+						phase = EthernetTxState.Payload
+					} else { index++ }
+				} elif (phase == EthernetTxState.Payload) {
+					crc = EthernetCrc.Update(crc, media.txData)
+					index++
+					if (index >= length && index >= 60) {
+						fcs = ~crc
+						index = 0
+						phase = EthernetTxState.Fcs
+					}
+				} elif (phase == EthernetTxState.Fcs) {
+					fcs = fcs >> 8
+					if (index == 3) { phase = EthernetTxState.Drain } else { index++ }
+				}
+			}
+
+			if (request != completed) {
+				result = EthernetResult.Invalid
+				if (command == 1) {
+					if (phase != EthernetTxState.Free) { result = EthernetResult.Busy }
+					elif (!link.ready || link.speed == EthernetSpeed.Unknown) { result = EthernetResult.NotReady }
+					elif (argument < 14 || argument > CAPACITY) { result = EthernetResult.Unsupported }
+					else {
+						length = argument as logic[LENGTH_BITS]
+						filled = 0
+						phase = EthernetTxState.Filling
+						result = EthernetResult.Success
+					}
+				} elif (command == 2 && phase == EthernetTxState.Filling && filled < length) {
+					writePending = true
+					writeAddress = filled as logic[ADDRESS_BITS]
+					writeByte = argument as byte
+					if (filled == 12) { typeHigh = argument as byte }
+					if (filled == 13) { typeLow = argument as byte }
+					filled++
+					result = EthernetResult.Success
+				} elif (command == 3) {
+					if (phase != EthernetTxState.Free && phase != EthernetTxState.Filling) { result = EthernetResult.Busy }
+					elif (phase == EthernetTxState.Filling && filled == length) {
+						if (!typeSupported) { result = EthernetResult.Unsupported }
+						elif (!link.ready || link.speed == EthernetSpeed.Unknown) { result = EthernetResult.NotReady }
+						else {
+							phase = EthernetTxState.Preamble
+							index = 0
+							crc = 0xFFFFFFFF
+							frameSpeed = link.speed
+							outcome = EthernetTransmitOutcome.None
+							result = EthernetResult.Accepted
+						}
+					}
+				} elif (command == 4) {
+					if (phase == EthernetTxState.Filling) {
+						phase = EthernetTxState.Free
+						result = EthernetResult.Success
+					} elif (phase != EthernetTxState.Free) { result = EthernetResult.Busy }
+				} elif (command == 5) {
+					result = EthernetResult.NotReady
+					if (phase == EthernetTxState.Complete) {
+						phase = EthernetTxState.Free
+						outcome = EthernetTransmitOutcome.None
+						result = EthernetResult.Success
+					}
+				}
+				completed = request
+			}
+
+			goto Run
+		}
+	}
+
+	// The read port tracks the next payload byte throughout each four-clock slot.
+	// Filling and wire transmission are exclusive; writes cannot collide with reads.
+	process MemoryCommands[]()
+	{
+		ram.enable = true
+		ram.writeEnable = writePending
+		ram.writeData = writeByte
+		ram.address = 0
+		if (phase == EthernetTxState.Payload && index < length) { ram.address = index as logic[ADDRESS_BITS] }
+		if (writePending) { ram.address = writeAddress }
+	}
+}

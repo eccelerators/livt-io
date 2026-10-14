@@ -1,0 +1,17 @@
+namespace Livt.IO
+
+/**
+ * RMII data pins viewed from the FPGA adapter. Reference clock and reset bind
+ * to its context separately; board wiring owns clock source/direction and pads.
+ */
+public interface IRmiiPins
+{
+	// PHY-driven receive data, combined carrier/data-valid, and receive error.
+	rxData: in logic[2]
+	crsDv: in logic
+	rxError: in logic
+
+	// FPGA-driven transmit data and enable.
+	txData: out logic[2]
+	txEnable: out logic
+}

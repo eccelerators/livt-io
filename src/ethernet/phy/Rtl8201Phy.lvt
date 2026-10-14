@@ -1,0 +1,101 @@
+namespace Livt.IO.Phy
+
+using Livt.IO
+
+/**
+ * RTL8201F-VB management in the MAC context, after board reset/clock startup.
+ * Advertises only 100BASE-TX full duplex. Hardware reset belongs to the board.
+ * MDIO is borrowed exclusively; loss/failure clears readiness and retries setup.
+ */
+component Rtl8201Phy<PHY_ADDRESS: int = 1, POLL: Time = 10ms> : IEthernetLinkStatus
+{
+	static assert PHY_ADDRESS >= 0 && PHY_ADDRESS <= 31, "Clause 22 address required"
+	static assert POLL >= 1us, "Polling interval must be positive"
+	mdio: IMdioController
+	startupReady: bool
+	POLL_TICKS: uint
+	public failed: out bool
+	linked: bool
+	failedState: bool
+
+	new(mdio: IMdioController, startupReady: bool)
+	{
+		POLL_TICKS = this.context.TicksFor(POLL)
+		this.mdio = mdio
+		this.startupReady = startupReady
+	}
+
+	process Status[]()
+	{
+		this.ready = linked && startupReady
+		this.failed = failedState
+		this.speed = EthernetSpeed.Unknown
+		if (this.ready) { this.speed = EthernetSpeed.Mbps100 }
+	}
+
+	process Manage()
+	{
+		var value: logic[16] = 0
+		var status: logic[16] = 0
+		var partner: logic[16] = 0
+		var ticks: uint = 0
+		state Initialize {
+			linked = false
+			
+			failedState = false
+			if (!startupReady) { goto Initialize }
+		}
+		if (mdio.Write(PHY_ADDRESS as byte, 31, 0) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 2, value) != EthernetResult.Success || value != 0x001C) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 3, value) != EthernetResult.Success) { goto Failed }
+		var identifier = value & 0xFFF0
+		if (identifier != 0xC810) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 31, 7) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 16, value) != EthernetResult.Success) { goto Failed }
+		// Preserve reserved/delay fields, output REF_CLK, standard CRS_DV, RMII.
+		value = (value & 0xEFFB) | 0x0008
+		if (mdio.Write(PHY_ADDRESS as byte, 16, value) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 16, value) != EthernetResult.Success) { goto Failed }
+		var mode = value & 0x100C
+		if (mode != 0x0008) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 31, 0) != EthernetResult.Success) { goto Failed }
+		// IEEE selector + 100 full only; no half duplex, pause or 10M advertisement.
+		if (mdio.Write(PHY_ADDRESS as byte, 4, 0x0101) != EthernetResult.Success) { goto Failed }
+		// Disable EEE advertisement through the standard MMD register window.
+		if (mdio.Write(PHY_ADDRESS as byte, 13, 0x0007) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 14, 0x003C) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 13, 0x4007) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 14, 0) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 0, 0x1200) != EthernetResult.Success) { goto Failed }
+		state Poll {
+			if (!startupReady) { goto Initialize }
+		}
+		// BMSR link status is latch-low: read twice before deciding current state.
+		if (mdio.Read(PHY_ADDRESS as byte, 1, status) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 1, status) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 5, partner) != EthernetResult.Success) { goto Failed }
+		state Publish {
+			var stateBits = status & 0x0034
+			var partnerBits = partner & 0x611F
+			linked = startupReady && stateBits == 0x0024 && partnerBits == 0x4101
+			
+			
+			ticks = 0
+		}
+		state Delay {
+			if (!startupReady) { goto Initialize }
+			if (ticks + 1 < POLL_TICKS) { ticks++; goto Delay }
+			goto Poll
+		}
+		state Failed {
+			linked = false
+			
+			failedState = true
+			ticks = 0
+		}
+		state Retry {
+			if (ticks + 1 < POLL_TICKS) { ticks++; goto Retry }
+			goto Initialize
+		}
+	}
+}

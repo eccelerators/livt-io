@@ -1,0 +1,11 @@
+namespace Livt.IO
+
+/** One serialized caller; each operation includes 32 preamble bits and bounded wire time. */
+public interface IMdioController
+{
+	/** Success reads 16 bits; absent/invalid turnaround gives DeviceFailure and zero. */
+	fn Read(phy: byte, register: byte, value: out logic[16]) EthernetResult
+
+	/** Success reports local write completion, not acknowledgment by the PHY. */
+	fn Write(phy: byte, register: byte, value: logic[16]) EthernetResult
+}

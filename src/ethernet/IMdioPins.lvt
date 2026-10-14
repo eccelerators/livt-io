@@ -1,0 +1,14 @@
+namespace Livt.IO
+
+/**
+ * Split MDIO pad contract viewed from the management controller. The board pad
+ * adapter drives mdioOutput only while mdioOutputEnable is true, otherwise Z.
+ * MDC is an output signal derived with a clock enable, not a new Livt context.
+ */
+public interface IMdioPins
+{
+	mdc: out logic
+	mdioInput: in logic
+	mdioOutput: out logic
+	mdioOutputEnable: out bool
+}

@@ -1,0 +1,25 @@
+namespace Livt.IO.Tests
+using Livt.IO
+
+@Test
+component EthernetCrcTest
+{
+	@Test
+	fn MatchesPublishedCheckAndResidue()
+	{
+		var crc: logic[32] = 0xFFFFFFFF
+		for (var value = 0x31; value <= 0x39; value++) {
+			crc = EthernetCrc.Update(crc, value as byte)
+		}
+		assert (~crc) == 0xCBF43926
+		crc = EthernetCrc.Update(crc, 0x26)
+		crc = EthernetCrc.Update(crc, 0x39)
+		crc = EthernetCrc.Update(crc, 0xF4)
+		crc = EthernetCrc.Update(crc, 0xCB)
+		assert crc == 0xDEBB20E3
+		assert EthernetCrc.SupportedType(0x08, 0x00)
+		assert !EthernetCrc.SupportedType(0x81, 0x00)
+		assert !EthernetCrc.SupportedType(0x88, 0xA8)
+		assert !EthernetCrc.SupportedType(0x05, 0xFF)
+	}
+}

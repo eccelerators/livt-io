@@ -1,0 +1,12 @@
+namespace Livt.IO
+
+/**
+ * Coherent same-context status supplied by PHY management to MAC and adapter.
+ * Ready asserts only for a supported, resolved full-duplex mode. Speed changes
+ * require at least one edge with ready false, aborting old in-flight work.
+ */
+public interface IEthernetLinkStatus
+{
+	ready: out bool
+	speed: out EthernetSpeed
+}

@@ -1,0 +1,187 @@
+namespace Livt.IO
+
+/**
+ * Complete-frame receiver with a four-byte FCS tail and one exclusively owned RAM.
+ * No receive backpressure: occupied slots cause whole-event drops. Wire CRC is
+ * checked with the Ethernet residue, independent of the transmitter's FCS output.
+ */
+component EthernetReceiver<CAPACITY: int = 1514, PROMISCUOUS: bool = false> : IEthernetReceiver
+{
+	static assert CAPACITY >= 60 && CAPACITY <= 1514, "Ethernet capacity must be 60..1514"
+	media: IEthernetMedia
+	link: IEthernetLinkStatus
+	localMac: byte[6]
+	const ADDRESS_BITS: int = Bits.RequiredFor(CAPACITY - 1)
+	const LENGTH_BITS: int = Bits.RequiredFor(CAPACITY)
+	// Four FCS bytes plus one saturated oversize sentinel must fit.
+	const COUNT_BITS: int = Bits.RequiredFor(CAPACITY + 5)
+	ram: SynchronousRam<byte, logic[ADDRESS_BITS], CAPACITY, MemoryStyle.Block>
+	writePending: bool
+	writeAddress: logic[ADDRESS_BITS]
+	writeByte: byte
+	published: bool
+	acquired: bool
+	length: logic[LENGTH_BITS]
+	active: bool
+	dropBusy: bool
+	physicalError: bool
+	dataPhase: bool
+	preamble: logic[3]
+	count: logic[COUNT_BITS]
+	tail: logic[32]
+	crc: logic[32]
+	localMatch: bool
+	broadcast: bool
+	typeHigh: byte
+	typeLow: byte
+	rate: EthernetSpeed
+	counters: uint[6]
+
+	command: logic[2]
+	address: int
+	request: bool
+	completed: bool
+	result: EthernetResult
+	readAddress: logic[ADDRESS_BITS]
+	readPending: logic[2]
+	readValue: byte
+
+	new(media: IEthernetMedia, link: IEthernetLinkStatus, localMac: byte[6])
+	{
+		assert this.context.ticksPerSecond == 50000000, "Ethernet requires a 50 MHz context"
+		this.ram = new SynchronousRam<byte, logic[ADDRESS_BITS], CAPACITY, MemoryStyle.Block>()
+		this.media = media
+		this.link = link
+		this.localMac = localMac
+	}
+
+	fn Execute(operation: int, index: int) EthernetResult
+	{
+		state { command = operation as logic[2]; address = index; request = !request }
+		while (request != completed) { state {} }
+		return result
+	}
+
+	override fn GetReceiveCapacity() int { return CAPACITY }
+	override fn HasReceiveFrame() bool { return published || acquired }
+	override fn TryAcquire() EthernetResult { return Execute(1, 0) }
+	override fn TryRelease() EthernetResult { return Execute(2, 0) }
+	override fn GetReceiveLength() int
+	{
+		if (acquired) { return (length as uint) as int }
+		return 0
+	}
+	override fn TryRead(index: int, value: out byte) EthernetResult
+	{
+		var answer = Execute(3, index)
+		value = readValue
+		return answer
+	}
+	// Native on-chip RAM has no hardware error indication or ECC in this backend.
+	override fn HasReceiveError() bool { return false }
+	override fn TryAcknowledgeReceiveError() EthernetResult { return EthernetResult.NotReady }
+	override fn GetDiscardCount(reason: EthernetReceiveDiscard) uint
+	{
+		if (reason == EthernetReceiveDiscard.BufferFull) { return counters[0] }
+		if (reason == EthernetReceiveDiscard.PhysicalError) { return counters[1] }
+		if (reason == EthernetReceiveDiscard.InvalidLength) { return counters[2] }
+		if (reason == EthernetReceiveDiscard.BadFcs) { return counters[3] }
+		if (reason == EthernetReceiveDiscard.UnsupportedFrame) { return counters[4] }
+		return counters[5]
+	}
+
+	process Tick()
+	{
+		state Run {
+			writePending = false
+			var typeSupported = EthernetCrc.SupportedType(typeHigh, typeLow)
+			// Admission uses ownership at frame start, before same-edge API release.
+			if (media.rxStart) {
+				active = true
+				dropBusy = published || acquired
+				physicalError = !link.ready
+				dataPhase = false
+				preamble = 0
+				count = 0
+				tail = 0
+				crc = 0xFFFFFFFF
+				localMatch = true
+				broadcast = true
+				rate = link.speed
+			}
+			if (active) {
+				physicalError = physicalError || media.rxError || !link.ready || rate != link.speed
+				if (media.rxValid && !dropBusy) {
+					if (!dataPhase) {
+						if (media.rxData == 0x55 && preamble < 7) { preamble++ }
+						elif (media.rxData == 0xD5) { dataPhase = true }
+						else { physicalError = true }
+					} else {
+						crc = EthernetCrc.Update(crc, media.rxData)
+						if (count >= 4 && ((count as uint) as int) - 4 < CAPACITY) { writePending = true; writeAddress = (((count as uint) as int) - 4) as logic[ADDRESS_BITS]; writeByte = (tail & 0xFF) as byte }
+						tail = (tail >> 8) | (((media.rxData as uint) << 24) as logic[32])
+						if (count < 6) {
+							localMatch = localMatch && media.rxData == localMac[(count as uint) as int]
+							broadcast = broadcast && media.rxData == 0xFF
+						}
+						if (count == 12) { typeHigh = media.rxData }
+						if (count == 13) { typeLow = media.rxData }
+						if (count < ((CAPACITY + 5) as logic[COUNT_BITS])) { count++ }
+					}
+				}
+				if (media.rxEnd || !link.ready || rate != link.speed) {
+					var reason = -1
+					if (dropBusy) { reason = 0 }
+					elif (physicalError || !dataPhase) { reason = 1 }
+					elif (count < 64 || count > ((CAPACITY + 4) as logic[COUNT_BITS])) { reason = 2 }
+					elif (crc != 0xDEBB20E3) { reason = 3 }
+					elif (!typeSupported) { reason = 4 }
+					elif (!PROMISCUOUS && !localMatch && !broadcast) { reason = 5 }
+					if (reason >= 0) {
+						if (counters[reason] != 0xFFFFFFFF) { counters[reason] = counters[reason] + 1 }
+					} else {
+						published = true
+						length = (((count as uint) as int) - 4) as logic[LENGTH_BITS]
+					}
+					active = false
+				}
+			}
+
+			if (readPending > 0) {
+				readPending--
+				if (readPending == 0) { readValue = ram.readData; completed = request }
+			} elif (request != completed) {
+				result = EthernetResult.Invalid
+				readValue = 0
+				if (command == 1) {
+					result = EthernetResult.NotReady
+					if (acquired) { result = EthernetResult.Busy }
+					elif (published) {
+						published = false
+						acquired = true
+						result = EthernetResult.Success
+					}
+				} elif (command == 2 && acquired) {
+					acquired = false
+					result = EthernetResult.Success
+				} elif (command == 3 && acquired && address >= 0 && address < ((length as uint) as int)) {
+					readAddress = address as logic[ADDRESS_BITS]
+					readPending = 2
+					result = EthernetResult.Success
+				}
+				if (readPending == 0) { completed = request }
+			}
+			goto Run
+		}
+	}
+
+	// Acquired frames exclude receive writes for the whole next wire event.
+	process MemoryCommands[]()
+	{
+		ram.enable = writePending || readPending > 0
+		ram.writeEnable = writePending
+		ram.writeData = writeByte
+		ram.address = readAddress
+		if (writePending) { ram.address = writeAddress }
+	}
+}

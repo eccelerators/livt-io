@@ -1,0 +1,53 @@
+namespace Livt.IO
+
+/**
+ * Immediate scheduled operation result. Accepted transfers ownership to the
+ * transmitter; it does not report wire completion. See docs/ethernet.md.
+ */
+public enum EthernetResult
+{
+	Success
+	Accepted
+	NotReady
+	Busy
+	Invalid
+	Unsupported
+	DeviceFailure
+}
+
+/**
+ * Retained local TX outcome. Sent means the final FCS symbol left the MAC/PHY
+ * interface, not remote receipt. None is the reset/unsuccessful-query value.
+ */
+public enum EthernetTransmitOutcome
+{
+	None
+	Sent
+	LinkLost
+	DeviceFailure
+}
+
+/**
+ * Full-duplex rates understood by the contracts; declaring a rate does not
+ * imply that a particular implementation supports it.
+ */
+public enum EthernetSpeed
+{
+	Unknown
+	Mbps10
+	Mbps100
+}
+
+/**
+ * One mutually exclusive RX discard classification per completed receive event.
+ * Precedence and counter behavior are defined in docs/ethernet.md.
+ */
+public enum EthernetReceiveDiscard
+{
+	BufferFull
+	PhysicalError
+	InvalidLength
+	BadFcs
+	UnsupportedFrame
+	Filtered
+}

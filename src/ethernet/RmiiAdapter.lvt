@@ -1,0 +1,209 @@
+namespace Livt.IO
+
+/**
+ * RMII serializer and receive-valid reconstruction in the 50 MHz REF_CLK context.
+ * Standard CRS_DV is decoded per nibble, including alternating tail indications.
+ * ENABLE_10 is experimental until ETH-011 qualification; default accepts 100M only.
+ */
+component RmiiAdapter<ENABLE_10: bool = false>
+{
+	txDone: bool
+	txFault: bool
+	rxData: byte
+	rxValid: bool
+	rxStart: bool
+	rxEnd: bool
+	rxError: bool
+	media: IEthernetMedia
+	pins: IRmiiPins
+	link: IEthernetLinkStatus
+	enabled: bool
+	txActive: bool
+	txFinal: bool
+	txShift: logic[8]
+	txSymbol: int
+	txTicks: int
+	txSpeed: EthernetSpeed
+
+	new(pins: IRmiiPins, media: IEthernetMedia, link: IEthernetLinkStatus)
+	{
+		assert this.context.ticksPerSecond == 50000000, "Ethernet requires a 50 MHz context"
+		this.media = media
+		this.pins = pins
+		this.link = link
+	}
+
+	process Outputs[]()
+	{
+		media.txDone = txDone
+		media.txFault = txFault
+		media.rxData = rxData
+		media.rxValid = rxValid
+		media.rxStart = rxStart
+		media.rxEnd = rxEnd
+		media.rxError = rxError
+
+		enabled = link.ready && (link.speed == EthernetSpeed.Mbps100
+			|| (ENABLE_10 && link.speed == EthernetSpeed.Mbps10))
+		media.txReady = enabled && !media.txAbort && (!txActive
+			|| (txSymbol == 3 && txTicks == 0 && !txFinal && txSpeed == link.speed))
+	}
+
+	process Transmit()
+	{
+		state Tick {
+			txDone = false
+			txFault = false
+			if (!enabled || media.txAbort || (txActive && txSpeed != link.speed)) {
+				txFault = txActive
+				txActive = false
+				pins.txEnable = 0
+				pins.txData = 0
+			} elif (txActive && txTicks > 0) {
+				txTicks--
+			} elif (txActive && txSymbol < 3) {
+				txShift = txShift >> 2
+				pins.txData = (txShift & 0x03) as logic[2]
+				txSymbol++
+				txTicks = 0
+				if (txSpeed == EthernetSpeed.Mbps10) { txTicks = 9 }
+			} elif (txActive && txFinal) {
+				txActive = false
+				pins.txEnable = 0
+				pins.txData = 0
+				txDone = true
+			} elif (media.txValid) {
+				if ((!txActive && !media.txFirst) || (txActive && media.txFirst)) {
+					txFault = true
+					txActive = false
+					pins.txEnable = 0
+				} else {
+					txActive = true
+					txFinal = media.txLast
+					txShift = media.txData as logic[8]
+					pins.txData = (txShift & 0x03) as logic[2]
+					pins.txEnable = 1
+					txSymbol = 0
+					txSpeed = link.speed
+					txTicks = 0
+					if (txSpeed == EthernetSpeed.Mbps10) { txTicks = 9 }
+				}
+			} elif (txActive) {
+				// The wire cannot pause between bytes.
+				txActive = false
+				pins.txEnable = 0
+				txFault = true
+			}
+			goto Tick
+		}
+	}
+
+	process Receive()
+	{
+		var active = false
+		var started = false
+		var aligned = false
+		var dropping = false
+		var ones = 0
+		var ticks = 0
+		var rate: EthernetSpeed = EthernetSpeed.Unknown
+		var firstDv = false
+		var firstSymbol: logic[2] = 0
+		var second = false
+		var highNibble = false
+		var assembled: logic[8] = 0
+		var bad = false
+		state Tick {
+			rxValid = false
+			rxStart = false
+			rxEnd = false
+			rxError = false
+			if (!enabled || (active && rate != link.speed)) {
+				if (active && !dropping) {
+					rxStart = !started
+					rxEnd = true
+					rxError = true
+				}
+				active = false
+				dropping = false
+				ticks = 0
+			} elif (ticks > 0) {
+				ticks--
+			} else {
+				if (!active && pins.crsDv == 1) {
+					active = true
+					started = false
+					aligned = false
+					dropping = false
+					ones = 0
+					second = false
+					highNibble = false
+					bad = false
+					rate = link.speed
+				}
+				if (active) {
+					ticks = 0
+					if (rate == EthernetSpeed.Mbps10) { ticks = 9 }
+					bad = bad || pins.rxError != 0
+					if (dropping) {
+						if (pins.crsDv == 0) { active = false }
+					} elif (!aligned) {
+						if (pins.crsDv == 0 || bad || pins.rxData == 0b10) {
+							rxStart = !started
+							rxEnd = true
+							rxError = true
+							dropping = true
+						} elif (pins.rxData == 0b01) {
+							ones++
+							if (ones == 4) {
+								rxData = 0x55
+								rxValid = true
+								rxStart = !started
+								started = true
+								ones = 0
+							}
+						} elif (pins.rxData == 0b11 && (started || ones >= 3)) {
+							// SFD establishes octet/nibble phase even with shortened preamble.
+							rxData = 0xD5
+							rxValid = true
+							rxStart = !started
+							started = true
+							aligned = true
+							second = false
+							highNibble = false
+						} elif (pins.rxData != 0b00 || started || ones != 0) {
+							rxStart = !started
+							rxEnd = true
+							rxError = true
+							dropping = true
+						}
+					} elif (!second) {
+						firstSymbol = pins.rxData
+						firstDv = pins.crsDv == 1
+						second = true
+					} else {
+						second = false
+						if (!firstDv && pins.crsDv == 0) {
+							rxEnd = true
+							rxError = bad || highNibble
+							active = false
+						} else {
+							var nibble = (firstSymbol as uint) | ((pins.rxData as uint) << 2)
+							if (!highNibble) {
+								assembled = nibble as logic[8]
+								highNibble = true
+							} else {
+								assembled = assembled | ((nibble << 4) as logic[8])
+								rxData = assembled as byte
+								rxValid = true
+								rxError = bad
+								highNibble = false
+							}
+						}
+					}
+				}
+			}
+			goto Tick
+		}
+	}
+}

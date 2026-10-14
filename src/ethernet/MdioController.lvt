@@ -1,0 +1,116 @@
+namespace Livt.IO
+
+/** Clause 22 controller. MDC is a clock-enabled output, never an internal clock. */
+component MdioController : IMdioController
+{
+	pins: IMdioPins
+	HALF_TICKS: uint
+	request: bool
+	completed: bool
+	readRequest: bool
+	frame: logic[32]
+	readValue: logic[16]
+	result: EthernetResult
+
+	new(pins: IMdioPins)
+	{
+		HALF_TICKS = this.context.TicksFor(500ns)
+		this.pins = pins
+	}
+
+	// One command owner avoids cross-method writes to the request mailbox.
+	fn Execute(commandFrame: logic[32], reading: bool) EthernetResult
+	{
+		state { frame = commandFrame; readRequest = reading; request = !request }
+		while (request != completed) { state {} }
+		return result
+	}
+
+	override fn Read(phy: byte, register: byte, value: out logic[16]) EthernetResult
+	{
+		value = 0
+		if (phy > 31 || register > 31) { return EthernetResult.Invalid }
+		var commandFrame = 0x60000000 | (((phy as uint) << 23) as logic[32])
+			| (((register as uint) << 18) as logic[32])
+		var answer = Execute(commandFrame, true)
+		value = readValue
+		return answer
+	}
+
+	override fn Write(phy: byte, register: byte, value: logic[16]) EthernetResult
+	{
+		if (phy > 31 || register > 31) { return EthernetResult.Invalid }
+		var commandFrame = 0x50020000 | (((phy as uint) << 23) as logic[32])
+			| (((register as uint) << 18) as logic[32]) | ((value as uint) as logic[32])
+		return Execute(commandFrame, false)
+	}
+
+	process Transfer()
+	{
+		var bitIndex: int = 0
+		var ticks: uint = 0
+		var captured: logic[16] = 0
+		var failed = false
+		state Idle {
+			pins.mdc = 0
+			pins.mdioOutputEnable = false
+			pins.mdioOutput = 0
+			if (request != completed) {
+				bitIndex = 0
+				captured = 0
+				failed = false
+				goto Drive
+			} else { goto Idle }
+		}
+		state Drive {
+			pins.mdc = 0
+			pins.mdioOutputEnable = !(readRequest && bitIndex >= 46)
+			pins.mdioOutput = 1
+			if (bitIndex >= 32 && !(readRequest && bitIndex >= 46)) {
+				var shifted = frame >> (63 - bitIndex)
+				pins.mdioOutput = shifted as logic
+			}
+			ticks = 0
+			goto Low
+		}
+		state Low {
+			if (ticks + 1 < HALF_TICKS) {
+				ticks++
+				goto Low
+			} else {
+				pins.mdc = 1
+				ticks = 0
+				goto High
+			}
+		}
+		state High {
+			// Sample near the end of the high half, after the PHY's 300 ns maximum.
+			if (ticks + 1 < HALF_TICKS) {
+				ticks++
+				goto High
+			} else {
+				if (readRequest && bitIndex == 47 && pins.mdioInput != 0b0) {
+					failed = true
+				}
+				if (readRequest && bitIndex >= 48) {
+					captured = (captured << 1) | ((pins.mdioInput as uint) as logic[16])
+				}
+				pins.mdc = 0
+				if (bitIndex == 63) {
+					pins.mdioOutputEnable = false
+					readValue = captured
+					result = EthernetResult.Success
+					if (failed) {
+						readValue = 0
+						result = EthernetResult.DeviceFailure
+					}
+					completed = request
+					goto Idle
+				} else {
+					bitIndex++
+					goto Drive
+				}
+			}
+		}
+	}
+}

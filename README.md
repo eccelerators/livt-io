@@ -194,6 +194,22 @@ Defaults remain 56/48; receive capacity must be at least two for RTS/CTS.
 Small buffers require a correspondingly prompt peer. Basic UART ties permission
 active; elimination of unused flow-control logic still needs synthesis evidence.
 
+### Ethernet components
+
+`EthernetTransmitter`, `EthernetReceiver`, `RmiiAdapter` and `MdioController`
+provide vendor-neutral 100 Mbit/s full-duplex component implementations.
+`Livt.IO.Phy.Rtl8201Phy` supplies separate RTL8201F management. RX/TX use bounded,
+independently owned synchronous RAM; framing includes padding, CRC/FCS,
+validation, filtering and wire-error/drop handling.
+
+See the [Ethernet contract and constructors](docs/ethernet.md) and
+[reproducible verification suite](verification/ethernet/README.md). Independent
+leaf and complete Livt composition simulations pass, including independent
+full-duplex traffic, drops and recovery. Generic synthesis infers byte RAM with
+no latch diagnostics. Measured per-byte API throughput and single-slot limits
+are documented in the verification suite. Livt.Net integration, board/timing and 10 Mbit/s
+qualification remain separate work.
+
 ### I2C
 
 I2C support is v1 byte-level and fixed to standard mode:

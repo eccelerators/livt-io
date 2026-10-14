@@ -1,0 +1,36 @@
+namespace Livt.IO
+
+/**
+ * Scheduled store-and-forward TX capability for one serialized application owner.
+ * Append initializes a contiguous prefix; commit never reads unwritten storage.
+ * Frame bytes exclude preamble/SFD/FCS. The MAC adds any missing minimum padding.
+ */
+public interface IEthernetTransmitter
+{
+	/** Returns configured storage capacity, excluding generated padding and FCS. */
+	fn GetTransmitCapacity() int
+
+	/** Reserves an empty fill slot for length bytes; Success grants fill ownership. */
+	fn TryBegin(length: int) EthernetResult
+
+	/** Success appends one byte; Invalid means no fill or declared length reached. */
+	fn TryAppend(value: byte) EthernetResult
+
+	/**
+	 * Accepted commits a complete supported frame and ends fill ownership.
+	 * Invalid means incomplete/no fill; Unsupported means unsupported frame format.
+	 */
+	fn TryCommit() EthernetResult
+
+	/** Success discards an uncommitted fill; committed transmissions cannot cancel. */
+	fn TryDiscard() EthernetResult
+
+	/**
+	 * Success returns a retained terminal outcome, otherwise NotReady and None.
+	 * Reading a completion does not acknowledge it.
+	 */
+	fn TryGetCompletion(outcome: out EthernetTransmitOutcome) EthernetResult
+
+	/** Success clears a terminal result; NotReady means no result is pending. */
+	fn TryAcknowledgeCompletion() EthernetResult
+}

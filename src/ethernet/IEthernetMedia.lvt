@@ -1,0 +1,29 @@
+namespace Livt.IO
+
+/**
+ * Byte-level adapter boundary, directions from the media adapter's perspective.
+ * Bytes include preamble/SFD/FCS. All transfers use one shared context edge.
+ * RX has no backpressure. TX ready is a byte-slot enable, not an application FIFO.
+ * Full timing, abort and terminal-event rules are specified in docs/ethernet.md.
+ */
+public interface IEthernetMedia
+{
+	// MAC supplies stable byte/markers until valid && ready accepts them.
+	txData: in byte
+	txValid: in bool
+	txFirst: in bool
+	txLast: in bool
+	txAbort: in bool
+
+	// Adapter acceptance and one-cycle terminal events after serialization.
+	txReady: out bool
+	txDone: out bool
+	txFault: out bool
+
+	// Adapter emits bytes and boundaries; end may follow the last byte.
+	rxData: out byte
+	rxValid: out bool
+	rxStart: out bool
+	rxEnd: out bool
+	rxError: out bool
+}

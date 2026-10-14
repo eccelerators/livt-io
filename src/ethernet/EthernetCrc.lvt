@@ -1,0 +1,24 @@
+namespace Livt.IO
+
+/** Reflected Ethernet CRC-32; initial all ones, complemented little-endian FCS. */
+component EthernetCrc
+{
+	public static fn Update[](crc: logic[32], value: byte) logic[32]
+	{
+		var next = crc ^ ((value as uint) as logic[32])
+		for (var bit = 0; bit < 8; bit++) {
+			if ((next & 0x00000001) != 0x00000000) {
+				next = (next >> 1) ^ 0xEDB88320
+			} else {
+				next = next >> 1
+			}
+		}
+		return next
+	}
+
+	public static fn SupportedType[](high: byte, low: byte) bool
+	{
+		return high >= 0x06 && !(high == 0x81 && low == 0x00)
+			&& !(high == 0x88 && low == 0xA8)
+	}
+}
