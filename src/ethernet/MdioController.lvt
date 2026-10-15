@@ -33,7 +33,7 @@ component MdioController : IMdioController
 		var commandFrame = 0x60000000 | (((phy as uint) << 23) as logic[32])
 			| (((register as uint) << 18) as logic[32])
 		var answer = Execute(commandFrame, true)
-		value = readValue
+		if (answer == EthernetResult.Success) { value = readValue }
 		return answer
 	}
 
@@ -78,23 +78,25 @@ component MdioController : IMdioController
 				ticks++
 				goto Low
 			} else {
-				pins.mdc = 1
-				ticks = 0
-				goto High
-			}
-		}
-		state High {
-			// Sample near the end of the high half, after the PHY's 300 ns maximum.
-			if (ticks + 1 < HALF_TICKS) {
-				ticks++
-				goto High
-			} else {
+				// Sample before raising MDC. The PHY advances its next bit after
+				// this edge; the current bit has settled since the previous rise.
 				if (readRequest && bitIndex == 47 && pins.mdioInput != 0b0) {
 					failed = true
 				}
 				if (readRequest && bitIndex >= 48) {
 					captured = (captured << 1) | ((pins.mdioInput as uint) as logic[16])
 				}
+				pins.mdc = 1
+				ticks = 0
+				goto High
+			}
+		}
+		state High {
+			if (ticks + 1 < HALF_TICKS) {
+				ticks++
+				goto High
+			} else {
+
 				pins.mdc = 0
 				if (bitIndex == 63) {
 					pins.mdioOutputEnable = false

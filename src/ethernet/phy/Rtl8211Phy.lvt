@@ -1,0 +1,126 @@
+namespace Livt.IO.Phy
+
+using Livt.IO
+
+/** RTL8211F Clause-22 manager. One MDIO owner; only 100BASE-TX full duplex.
+ * Board supplies 25 MHz reference, reset and startupReady. Restart is a toggle.
+ * RX delay enabled, TX delay disabled: board must supply TX clock/data skew.
+ */
+component Rtl8211Phy<PHY_ADDRESS: int = 1, POLL: Time = 10ms> : IEthernetLinkStatus
+{
+	static assert PHY_ADDRESS >= 0 && PHY_ADDRESS <= 31, "Clause 22 address required"
+	static assert POLL >= 1us, "Polling interval must be positive"
+	mdio: IMdioController
+	startupReady: bool
+	restart: bool
+	seenRestart: bool
+	linked: bool
+	POLL_TICKS: uint
+	public failed: out bool
+	public stage: out byte
+	public identifier1: out logic[16]
+	public identifier2: out logic[16]
+	public bmsr: out logic[16]
+	public physicalStatus: out logic[16]
+
+	new(mdio: IMdioController, startupReady: bool, restart: bool)
+	{
+		this.mdio = mdio
+		this.startupReady = startupReady
+		this.restart = restart
+		POLL_TICKS = this.context.TicksFor(POLL)
+	}
+
+	process Status[]()
+	{
+		this.ready = linked && startupReady && restart == seenRestart
+		this.speed = EthernetSpeed.Unknown
+		if (this.ready) {
+			this.speed = EthernetSpeed.Mbps100
+		}
+	}
+
+	process Manage()
+	{
+		var value: logic[16] = 0
+		var status: logic[16] = 0
+		var physical: logic[16] = 0
+		var ticks: uint = 0
+		var attempts: uint = 0
+		state Initialize {
+			linked = false
+			failed = false
+			seenRestart = restart
+			stage = 1
+			if (!startupReady) { goto Initialize }
+		}
+		if (mdio.Write(PHY_ADDRESS as byte, 31, 0) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 2, value) != EthernetResult.Success) { goto Failed }
+		identifier1 = value
+		if (value != 0x001C) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 3, value) != EthernetResult.Success) { goto Failed }
+		identifier2 = value
+		if ((value & 0xFFF0) != 0xC910) { goto Failed }
+		stage = 2
+		if (mdio.Write(PHY_ADDRESS as byte, 0, 0x8000) != EthernetResult.Success) { goto Failed }
+		attempts = 0
+		state ResetWait {}
+		if (mdio.Read(PHY_ADDRESS as byte, 0, value) != EthernetResult.Success) { goto Failed }
+		if ((value & 0x8000) != 0) {
+			attempts++
+			if (attempts > 10000) { goto Failed }
+			goto ResetWait
+		}
+		stage = 3
+		// RTL8211F RGMII delay registers: TX page d08/reg11 bit8; RX reg15 bit3.
+		if (mdio.Write(PHY_ADDRESS as byte, 31, 0x0D08) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 17, value) != EthernetResult.Success) { goto Failed }
+		value = value & 0xFEFF
+		if (mdio.Write(PHY_ADDRESS as byte, 17, value) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 17, value) != EthernetResult.Success || (value & 0x0100) != 0) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 21, value) != EthernetResult.Success) { goto Failed }
+		value = value | 0x0008
+		if (mdio.Write(PHY_ADDRESS as byte, 21, value) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 21, value) != EthernetResult.Success || (value & 0x0008) == 0) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 31, 0) != EthernetResult.Success) { goto Failed }
+		stage = 4
+		if (mdio.Write(PHY_ADDRESS as byte, 4, 0x0101) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 9, 0) != EthernetResult.Success) { goto Failed }
+		// Disable EEE advertisement, MMD 7 register 3c.
+		if (mdio.Write(PHY_ADDRESS as byte, 13, 7) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 14, 0x003C) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 13, 0x4007) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 14, 0) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 0, 0x1200) != EthernetResult.Success) { goto Failed }
+		state Poll {
+			stage = 5
+			if (!startupReady || restart != seenRestart) { goto Initialize }
+		}
+		if (mdio.Read(PHY_ADDRESS as byte, 1, status) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 1, status) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 31, 0x0A43) != EthernetResult.Success) { goto Failed }
+		if (mdio.Read(PHY_ADDRESS as byte, 26, physical) != EthernetResult.Success) { goto Failed }
+		if (mdio.Write(PHY_ADDRESS as byte, 31, 0) != EthernetResult.Success) { goto Failed }
+		state Publish {
+			bmsr = status
+			physicalStatus = physical
+			linked = (status & 0x0024) == 0x0024 && (physical & 0x003C) == 0x001C
+			ticks = 0
+		}
+		state Delay {
+			if (!startupReady || restart != seenRestart) { goto Initialize }
+			if (ticks + 1 < POLL_TICKS) { ticks++; goto Delay }
+			goto Poll
+		}
+		state Failed {
+			linked = false
+			failed = true
+			ticks = 0
+		}
+		state Retry {
+			if (restart != seenRestart) { goto Initialize }
+			if (ticks + 1 < POLL_TICKS) { ticks++; goto Retry }
+			goto Initialize
+		}
+	}
+}

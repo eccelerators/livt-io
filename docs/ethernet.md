@@ -1,19 +1,16 @@
 # Ethernet contracts
 
-Status: ETH-001–ETH-008 are complete at the component and integration simulation
-level. The vendor-neutral MAC, RMII adapter and MDIO controller, plus the separate
-RTL8201F manager, pass independent wire/API tests through a real Livt composition.
-Generic GHDL synthesis passes with inferred byte RAM and no latch diagnostics.
-See [verification commands, measured throughput and limits](../verification/ethernet/README.md).
-Board operation, device mapping and routed timing remain ETH-010.
+Livt.IO provides buffered Ethernet receive/transmit engines, a media interface,
+an RMII adapter, MDIO transport and PHY management components. This document
+describes their configuration, ownership rules and integration requirements.
 
 ## Scope and layering
 
-The initial implementation provides full-duplex 100 Mbit/s RMII using one
+The RMII implementation provides full-duplex 100 Mbit/s RMII using one
 50 MHz clock/reset context. The contracts represent 10 Mbit/s as well, but that
 rate must not be advertised until separately implemented and qualified. MII,
 half-duplex, VLAN-tagged frames, jumbo frames and pause-frame flow control are
-outside the initial implementation. Ethernet transport does not imply an IP,
+not supported. Ethernet transport does not imply an IP,
 UDP or TCP stack.
 
 Public declarations live in `Livt.IO`, under `src/ethernet`:
@@ -40,6 +37,7 @@ Implemented constructors are:
 | `RmiiAdapter<ENABLE_10 = false>` | `(pins: IRmiiPins, media: IEthernetMedia, link: IEthernetLinkStatus)` |
 | `MdioController` | `(pins: IMdioPins)`, implements `IMdioController.Read/Write` |
 | `Livt.IO.Phy.Rtl8201Phy<PHY_ADDRESS = 1, POLL = 10ms>` | `(mdio: IMdioController, startupReady: bool)`, implements `IEthernetLinkStatus` |
+| `Livt.IO.Phy.Rtl8211Phy<PHY_ADDRESS = 1, POLL = 10ms>` | `(mdio: IMdioController, startupReady: bool, restart: bool)`, implements `IEthernetLinkStatus` |
 
 The buffered receiver/transmitter own independent `SynchronousRam` instances
 with block-memory intent, capacity-derived address widths and no payload reset.
@@ -51,23 +49,18 @@ serialized application owner; MDIO has one serialized management owner.
 
 Use the same media signal bundle for the RMII adapter and two MAC engines.
 The adapter drives `txReady/txDone/txFault` and the RX signals, while TX drives
-`txData/txValid/txFirst/txLast/txAbort`; RX only observes it. The executable
-[Livt composition example](../verification/ethernet/specializations/EthernetIntegration.lvt)
-connects all five components and exposes application interfaces plus RMII/MDIO
-pins and accepts `localMac: byte[6]` as stable constructor configuration. This
-avoids [compiler issue 628](../../livt-project/releases/1.1.0/COMPILER.md#constructor-array-reset-latch)
-when synthesizing with asynchronous reset. It uses 60-byte slots and a 1 us PHY polling interval to keep verification
-bounded; production defaults are 1514 bytes and 10 ms. The PHY reset supervisor
-must supply `startupReady` and the common 50 MHz context. Tests drive independent
-incoming frames and check outgoing dibits against Python/zlib vectors.
+`txData/txValid/txFirst/txLast/txAbort`; RX only observes it. Supply `localMac: byte[6]` as stable constructor configuration. The PHY
+reset supervisor supplies `startupReady` after the reference clock and hardware
+reset sequence are complete.
 
-Generic MDIO transport belongs in IO; `Rtl8201Phy` lives under `Livt.IO.Phy`
-(`src/ethernet/phy`) and contains only device-specific configuration.
-FPGA primitives, tri-state pads, PHY reset-pin wiring, pin assignments, clock
-sources and timing constraints stay in the board project. MAC/framing logic
-must contain no Gowin/AMD/etc. primitive or RTL8201-specific register dependency.
+Generic MDIO transport belongs to `Livt.IO`; PHY-specific configuration lives
+under `Livt.IO.Phy`. `Rtl8201Phy` manages an RMII PHY, while
+[`Rtl8211Phy`](rtl8211.md) manages an RTL8211F with RGMII. PHY management does not
+provide a media adapter. The integrating application supplies any FPGA primitives,
+tri-state pads, reset sequencing, pin assignments, clocks and timing constraints.
+MAC framing is independent of the PHY register configuration and FPGA vendor.
 
-Livt.Net now adapts these IO APIs through `Livt.Net.Drivers.Ethernet`
+Livt.Net adapts these IO APIs through `Livt.Net.Drivers.Ethernet`
 [`EthernetFrameReceiver` and `EthernetFrameTransmitter<S>`](../../livt-net/docs/ethernet.md).
 They reuse Net's existing frame capabilities and ARP/ICMP services. IO has no
 dependency on Net or `IPacketData`.
@@ -94,11 +87,12 @@ dependency on Net or `IPacketData`.
   address selection. Other than supported EtherType validation, the MAC does not
   interpret payloads or implement pause frames.
 
-Future configuration: independent `RX_CAPACITY` and `TX_CAPACITY` compile-time
-values in 60..1514, default 1514; compile-time `PROMISCUOUS`, default false;
-construction-bound `localMac: byte[6]`, stable until coordinated reset. A smaller
-capacity reduces the maximum supported frame, not its capture completeness.
-No buffer-slot count or runtime MAC-address update API is promised in v1.
+RX and TX each configure their own `CAPACITY` at compile time in 60..1514,
+defaulting to 1514. RX also configures `PROMISCUOUS`, defaulting to false.
+The constructor-bound `localMac: byte[6]` remains stable until coordinated reset.
+A smaller capacity reduces the maximum supported frame, not its capture
+completeness. There is one buffer slot per direction and no runtime MAC-address
+update API.
 
 ## Scheduled application API
 
@@ -209,7 +203,7 @@ byte-slot enable rather than buffering application transactions.
 - Ready indicates an available octet launch slot. During an active frame, the MAC
   must supply the next byte for every such slot. Missing valid is an underrun:
   adapter aborts and pulses txFault; it must never pause an active wire frame.
-- Between octet slots the adapter serializes the held byte. The initial RMII
+- Between octet slots the adapter serializes the held byte. The RMII
   cadence is four 50 MHz clocks per octet at 100 Mbit/s and forty at 10 Mbit/s.
 - `txDone` pulses for one cycle at the first boundary after the complete last
   symbol interval. Accepting Last alone is not completion. No next First may
@@ -229,14 +223,14 @@ byte-slot enable rather than buffering application transactions.
   interruption. Reset suppresses all pending events and drives TX inactive.
 
 `IRmiiPins` is viewed from the FPGA: rxData/crsDv/rxError are inputs;
-txData/txEnable are outputs. If a board does not route RX_ER, its wrapper binds
+txData/txEnable are outputs. If RX_ER is unavailable, the integrating wrapper binds
 rxError low and documents the lost diagnostic. CRC and other checks still apply.
 Reference clock/reset are context bindings outside this interface; no assumption
 is made that the FPGA sources the PHY reference clock.
 
 `IMdioPins` splits the bidirectional pad into input, output and output-enable.
-The board adapter drives Z whenever output-enable is false. The controller owns
-turnaround timing and MDC. PHY reset timing and straps are device/board concerns.
+The pad adapter drives Z whenever output-enable is false. The controller owns
+turnaround timing and MDC. PHY reset timing and straps are external integration requirements.
 
 `IEthernetLinkStatus` is produced in the same context as the MAC. Ready is false
 at reset and until the PHY reports a supported resolved full-duplex mode. Speed
@@ -247,7 +241,7 @@ second generated fabric clock.
 
 ## Storage, reset and throughput
 
-The first implementation owns one single-clock, single-port RX RAM and a separate
+The implementation owns one single-clock, single-port RX RAM and a separate
 TX RAM. RX writes while Receiving and serves application reads only while
 Acquired. TX fills before Committed and reads only after commit. Therefore each
 RAM has one owner at a time, while independent RAMs allow RX and TX to overlap.
@@ -255,7 +249,7 @@ The transmitter must prefetch with the synchronous RAM latency accounted for;
 the byte-slot timing is not a scheduled RAM-method timing promise.
 
 Default payload allocation is 2 * 1514 bytes, plus metadata, CRC state and
-serialization registers. Physical BRAM count and logic costs remain unmeasured.
+serialization registers. Physical memory and logic usage depend on the target and synthesis tool.
 Use uninitialized payload storage; reset clears ownership/length/status, not all
 RAM cells. Compile-time capacities determine RAM address widths; bounded control counters
 currently use Livt integer fields.
@@ -271,15 +265,15 @@ retain their configuration.
 A 100 Mbit/s link represents a raw 12.5 MB/s byte rate per direction, including
 wire overhead, not guaranteed application payload throughput. One RX slot loses
 frames while its predecessor is published/acquired; one TX slot introduces fill
-latency between frames. Scheduled calls and Net parsing have additional costs.
-No lossless minimum-gap application service claim is made. Tests must distinguish
-continuous media handling from application admission/drop behavior.
+latency between frames. Scheduled calls and upper-layer parsing have additional costs.
+No lossless minimum-gap application service claim is made. Continuous media handling is distinct from application admission/drop behavior.
 
-Independent application clocks require ETH-012. Ordinary per-byte `sync` calls
+Independent application clocks require an explicit clock-domain crossing adapter.
+Ordinary per-byte `sync` calls
 are not a throughput solution; current IO single-clock RAM/FIFO contracts do not
 imply dual-clock RAM or asynchronous FIFO support.
 
-## Mapping to existing Livt.Net capabilities (ETH-009)
+## Integration with Livt.Net
 
 The Net transmitter adapter has its own state and a statically bound `IPacketData`
 source. It must preserve the existing [frame-link contract](../../livt-net/docs/frame-link.md).
@@ -290,7 +284,7 @@ source. It must preserve the existing [frame-link contract](../../livt-net/docs/
 | `IPacketData` ready/length/reads | Ready only while acquired; exact IO length; map no acquisition to PacketDataResult.NotReady, bad index or local read failure to Invalid (zero output), and expose the latter through sticky receive error |
 | Known wire length | True only while acquired; equal to available length, excluding FCS |
 | RX capture errors | Map sticky local IO failure; wire-drop counters do not poison every acquire |
-| TX minimum/maximum | Initially retain Net's minimum 60; maximum equals IO capacity |
+| TX minimum/maximum | Retain Net's minimum 60; maximum equals IO capacity |
 | `TrySubmit()` | Check prepared source and bounds, reserve IO fill, then return Accepted and begin the source borrow |
 | Copy progress | Scheduled source reads append bytes into IO; commit only after complete copy |
 | Source read/commit failure | Discard uncommitted fill, stop reads, then latch DeviceFailure |
@@ -300,40 +294,26 @@ source. It must preserve the existing [frame-link contract](../../livt-net/docs/
 | Cancellation | Advertise false; TryCancel returns Unsupported without changing ownership |
 | Reset | Use Net's coordinated reset barrier; never expose abandoned work as Delivered |
 
-Net composers already supply minimum padding, which IO preserves. No existing
-EthernetLite behavior changes. The new adapter's Delivered occurs after local
+Net composers already supply minimum padding, which IO preserves. The adapter's Delivered occurs after local
 wire-interface completion; the common Net capability retains its weaker meaning
 of device acceptance and never promises remote delivery. Protocol-dependent RX
 views must finish before release, including responses borrowing RX through TX.
 
-## Verification boundary
-
-ETH-001 verifies declaration syntax/types and document/API consistency only.
-Later issues must provide independent CRC/wire vectors, negative-frame tests,
-full/empty ownership tests, error precedence and reset/link transition coverage,
-then generated-HDL inspection, routed timing/resource reports and hardware tests.
-ETH-008 now supplies the reproducible integration evidence linked above; device
-implementation and hardware conformance remain separate acceptance gates.
-
-Protocol references: [TI RMII behavior note](https://www.ti.com/lit/an/snla076a/snla076a.pdf)
-and [Sipeed Ethernet example](https://github.com/sipeed/TangPrimer-20K-example/tree/main/Ethernet).
-The latter is 100 Mbit/s-only and uses device-specific RXDV configuration; it is
-not the contract for this portable adapter. Verify board-specific requirements
-against the RTL8201F datasheet and exact Dock schematic in ETH-002.
-
-## Management and implementation notes (ETH-003–ETH-007)
+## MDIO and PHY management
 
 `MdioController` emits 64 MDC cycles per transaction, including all 32 preamble
 ones. Its context-derived half-period is at least 500 ns; the extra drive/setup
 state makes MDC slightly slower than 1 MHz. Reads release MDIO for both
 turnaround bits and data, check the second turnaround bit is zero, and sample
-near the end of the high phase, beyond the RTL8201F's 300 ns output-delay bound.
+immediately before raising MDC, after the previous PHY data launch has settled.
+PHY data may advance within 0–300 ns after an MDC rising edge; sampling late in
+the high phase reads the next bit and shifts the returned register word.
 No response returns `DeviceFailure` with zero data; invalid 5-bit addresses
 return `Invalid` without clocking. Write success means the local transaction
-finished; Clause 22 has no write acknowledgment. The board supplies the
+finished; Clause 22 has no write acknowledgment. The integrating application supplies the
 tri-state pad and a suitable pull-up.
 
-`Rtl8201Phy` waits for the board's `startupReady` after PHY reset/clock startup.
+`Rtl8201Phy` waits for `startupReady` after PHY reset/clock startup.
 It verifies IDs `001C/C81x`, preserves page-7 register-16 delay/reserved fields,
 selects PHY-supplied REF_CLK and standard CRS_DV, advertises only 100BASE-TX full
 duplex (`ANAR=0101`), disables EEE advertisement and restarts autonegotiation.
@@ -342,7 +322,7 @@ and checks the link partner's acknowledged IEEE advertisement includes 100-full.
 Missing/wrong PHY and management failures clear readiness and retry setup.
 Unsupported/unfinished negotiation remains not ready. `failed` reports a
 management/configuration failure; link-down alone is not a management failure.
-Hardware reset sequencing stays in the board's independent-clock supervisor.
+Hardware reset sequencing is supplied externally.
 
 The receiver's native RAM backend has no ECC/error output. `HasReceiveError`
 is therefore false and its acknowledgment returns `NotReady`; invalid API reads
@@ -351,7 +331,7 @@ increment saturating counters with the documented precedence. No invalid or
 partially received frame becomes readable. Reset invalidates metadata rather
 than clearing cells, so stale bytes remain inaccessible.
 
-The initial manager never advertises 10M. `ENABLE_10` is an experimental adapter
-option, not ETH-011 qualification. There is no half-duplex collision handling,
-clock-domain FIFO, board pad wrapper or timing-closure claim in this component
-milestone. ETH-009 supplies the separate Livt.Net adapters.
+The PHY managers advertise only 100 Mbit/s full duplex. `ENABLE_10` is an
+experimental RMII adapter option, not a supported end-to-end 10 Mbit/s mode.
+Half-duplex collision handling, asynchronous clock-domain FIFOs and pad wrappers
+are not supplied by these components.

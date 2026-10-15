@@ -1,0 +1,96 @@
+namespace Livt.IO.Tests
+using Livt.IO
+using Livt.IO.Phy
+
+component PhyRegisters : IMdioController
+{
+	public advertisement: logic[16]
+	public gigabit: logic[16]
+	public txDelay: logic[16]
+	public rxDelay: logic[16]
+	public restarts: uint
+	public link: bool
+	public wrongId: bool
+	public physicalMode: logic[16]
+	page: logic[16]
+	new() { txDelay = 0xFFFF; rxDelay = 0; gigabit = 0xFFFF; link = true; physicalMode = 0x001C }
+	override fn Read(phy: byte, register: byte, value: out logic[16]) EthernetResult
+	{
+		assert phy == 1
+		value = 0
+		if (page == 0) {
+			if (register == 2 && !wrongId) { value = 0x001C }
+			elif (register == 3) { value = 0xC916 }
+			elif (register == 1 && link) { value = 0x0024 }
+		} elif (page == 0x0D08) {
+			if (register == 17) { value = txDelay }
+			elif (register == 21) { value = rxDelay }
+		}
+		if (page == 0x0A43 && register == 26 && link) { value = physicalMode }
+		return EthernetResult.Success
+	}
+	override fn Write(phy: byte, register: byte, value: logic[16]) EthernetResult
+	{
+		assert phy == 1
+		if (register == 31) { page = value }
+		elif (page == 0) {
+			if (register == 4) { advertisement = value }
+			elif (register == 9) { gigabit = value }
+			elif (register == 0 && value == 0x1200) { restarts++ }
+		} elif (page == 0x0D08) {
+			if (register == 17) { txDelay = value }
+			elif (register == 21) { rxDelay = value }
+		}
+		return EthernetResult.Success
+	}
+}
+
+@Test
+@Context(ClockFrequency = 50MHz)
+component Rtl8211PhyTest
+{
+	registers: PhyRegisters
+	phy: Rtl8211Phy<1, 1us>
+	startup: bool
+	restart: bool
+	new() { registers = new PhyRegisters(); phy = new Rtl8211Phy<1, 1us>(registers, startup, restart) }
+	fn Settle() { for (var i = 0; i < 2000; i++) { state {} } }
+	@Test
+	fn ConfigurationAndRecovery()
+	{
+		assert !phy.ready
+		startup = true
+		this.Settle()
+		assert phy.ready
+		assert phy.speed == EthernetSpeed.Mbps100
+		assert registers.advertisement == 0x0101
+		assert registers.gigabit == 0
+		assert registers.txDelay == 0xFEFF
+		assert registers.rxDelay == 8
+		registers.physicalMode = 0x002C
+		this.Settle()
+		assert !phy.ready
+		registers.physicalMode = 0x0014
+		this.Settle()
+		assert !phy.ready
+		registers.physicalMode = 0x001C
+		this.Settle()
+		assert phy.ready
+		registers.link = false
+		this.Settle()
+		assert !phy.ready
+		registers.link = true
+		this.Settle()
+		assert phy.ready
+		restart = !restart
+		this.Settle()
+		assert phy.ready && registers.restarts == 2
+		registers.wrongId = true
+		restart = !restart
+		this.Settle()
+		assert !phy.ready
+		registers.wrongId = false
+		this.Settle()
+		assert phy.ready
+	}
+}
