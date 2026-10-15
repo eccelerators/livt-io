@@ -1,7 +1,7 @@
 # Livt.IO
 
 `Livt.IO` provides reusable input/output components for the Livt base library.
-It combines byte- and word-addressable memory, UART serial I/O, and protocol bus
+It combines byte- and word-addressable memory, UART serial I/O, Ethernet, and protocol bus
 helpers into one package so applications can depend on `Livt.IO` instead of
 separate `Ram` or `Uart` packages.
 
@@ -28,6 +28,10 @@ The 1.2.0 package surface is intentionally small and hardware-oriented:
 - `Livt.IO.I2CMaster`: byte-level standard-mode I2C master.
 - `Livt.IO.I2CSlave`: byte-event standard-mode I2C target.
 - `Livt.IO.I2CRegisterSlave`: 256-byte register-file helper for I2C targets.
+- `Livt.IO.EthernetReceiver` / `EthernetTransmitter`: RAM-backed Ethernet frame reception and transmission.
+- `Livt.IO.RmiiAdapter`: 100 Mbit/s full-duplex RMII media adapter.
+- `Livt.IO.MdioController`: serialized Clause 22 PHY register access.
+- `Livt.IO.Phy.Rtl8201Phy` / `Rtl8211Phy`: PHY configuration and link monitoring.
 - `Livt.IO.SPIBus`: push-pull, single-data-lane SPI bus contract.
 - `Livt.IO.SPIMaster`: context-timed, byte-level SPI Mode 0 controller.
 
@@ -45,7 +49,9 @@ should depend on `Livt.IO`; `Livt.IO` supersedes the standalone `Ram` and `Uart`
 
 `Livt.IO` keeps public components in the root namespace for short, compatible
 call sites. Protocol components use readable prefixes such as `I2CMaster` and
-`SPIMaster` rather than nested protocol namespaces.
+`SPIMaster` rather than nested protocol namespaces. Device-specific Ethernet PHY
+managers live in `Livt.IO.Phy`; generic MAC, media and MDIO components remain
+in `Livt.IO`.
 
 | Component | Synthesizable | Purpose |
 |---|---|---|
@@ -73,6 +79,12 @@ call sites. Protocol components use readable prefixes such as `I2CMaster` and
 | `I2CMaster` | Yes | Byte-level standard-mode I2C master |
 | `I2CSlave` | Yes | Byte-event standard-mode I2C target |
 | `I2CRegisterSlave` | Yes | 256-byte register-file helper built on `I2CSlave` |
+| `EthernetReceiver<CAPACITY, PROMISCUOUS>` | Yes | Buffered frame reception, FCS validation, filtering and discard counters |
+| `EthernetTransmitter<CAPACITY>` | Yes | Buffered frame transmission, padding, FCS and retained completion |
+| `RmiiAdapter<ENABLE_10>` | Yes | RMII serialization and byte assembly; supported mode is 100 Mbit/s full duplex |
+| `MdioController` | Yes | Clause 22 MDIO register reads and writes |
+| `Phy.Rtl8201Phy<PHY_ADDRESS, POLL>` | Yes | RTL8201F configuration and 100-full link monitoring |
+| `Phy.Rtl8211Phy<PHY_ADDRESS, POLL>` | Yes | RTL8211F configuration, restart and 100-full link monitoring |
 | `SPIBus` | Yes | Push-pull, single-data-lane SPI bus interface |
 | `SPIMaster` | Yes | Byte-level SPI Mode 0 master with context-derived timing |
 
@@ -196,19 +208,33 @@ active; elimination of unused flow-control logic still needs synthesis evidence.
 
 ### Ethernet components
 
-`EthernetTransmitter`, `EthernetReceiver`, `RmiiAdapter` and `MdioController`
-provide vendor-neutral 100 Mbit/s full-duplex component implementations.
-`Livt.IO.Phy.Rtl8201Phy` supplies separate RTL8201F management. RX/TX use bounded,
-independently owned synchronous RAM; framing includes padding, CRC/FCS,
-validation, filtering and wire-error/drop handling.
+`EthernetReceiver` and `EthernetTransmitter` provide vendor-neutral buffered
+Ethernet II framing. Each owns a synchronous RAM with configurable capacity
+(default 1514 bytes). Reception validates length and FCS, filters destination
+addresses and records discard reasons. Transmission supplies minimum-frame
+padding, FCS and the inter-frame gap, then retains completion until acknowledged.
+Application frame bytes exclude preamble, SFD and FCS.
 
-See the [Ethernet contract and constructors](docs/ethernet.md) and
-[reproducible verification suite](verification/ethernet/README.md). Independent
-leaf and complete Livt composition simulations pass, including independent
-full-duplex traffic, drops and recovery. Generic synthesis infers byte RAM with
-no latch diagnostics. Measured per-byte API throughput and single-slot limits
-are documented in the verification suite. Livt.Net integration, board/timing and 10 Mbit/s
-qualification remain separate work.
+`IEthernetMedia` separates the MAC engines from physical media adaptation.
+`RmiiAdapter` implements 100 Mbit/s full-duplex RMII in a shared 50 MHz context.
+`MdioController` provides serialized Clause 22 register access through split
+input/output/output-enable pins. The integrating application supplies pads,
+clocks, PHY reset sequencing and timing constraints.
+
+`Livt.IO.Phy.Rtl8201Phy` and `Livt.IO.Phy.Rtl8211Phy` configure their respective
+PHYs and expose readiness and speed through `IEthernetLinkStatus`. Both advertise
+100 Mbit/s full duplex only. RTL8211F management also supports a restart toggle,
+enables RGMII RX delay and disables TX delay; the external transmit path supplies
+clock/data skew. PHY management does not include an RGMII media adapter.
+
+RX and TX each have one frame slot, so link rate does not imply sustained
+application throughput. 10 Mbit/s operation, half-duplex, VLAN-tagged frames and
+jumbo frames are not supported end-to-end. IP and transport protocols belong to
+higher layers; Livt.Net provides adapters for these frame APIs.
+
+See [Ethernet contracts and constructors](docs/ethernet.md) and
+[RTL8211F management](docs/rtl8211.md) for ownership, configuration and integration
+requirements.
 
 ### I2C
 
@@ -300,13 +326,15 @@ livt test
 ```
 
 Short examples live in [`docs/usage.md`](docs/usage.md). Protocol details and
-caveats live in [`docs/i2c.md`](docs/i2c.md) and [`docs/spi.md`](docs/spi.md).
+caveats live in [Ethernet](docs/ethernet.md), [RTL8211F management](docs/rtl8211.md),
+[I2C](docs/i2c.md) and [SPI](docs/spi.md).
 Hardware and synthesis notes live in
 [`docs/hardware-notes.md`](docs/hardware-notes.md).
 
 ## 🛠️ Development Notes
 
-- Keep public components in `namespace Livt.IO`.
+- Keep generic public components in `namespace Livt.IO`; device-specific PHY
+  managers belong in `namespace Livt.IO.Phy`.
 - Prefix protocol components with the protocol acronym, for example `I2CMaster`
   and `SPIMaster`.
 - Keep tests in `namespace Livt.IO.Tests`.
