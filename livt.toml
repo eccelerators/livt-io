@@ -55,4 +55,4 @@ warnings = ["all"]
 warnings = ["all"]
 
 [dependencies]
-Livt.Collections = "1.1.0"
+Livt.Collections = "1.4.0"
