@@ -1,0 +1,79 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Observes actual low-drive pulses, resolving released lines through pull-ups.
+ */
+component I2CTimingBus : I2CBus
+{
+	// SCL phase tracking and minimum observed durations.
+	previousLow: bool
+	phaseTicks: int
+	minimumHigh: int
+	minimumLow: int
+	edges: int
+
+	/**
+	 * Initializes minima above any phase expected during these bounded tests.
+	 */
+	new()
+	{
+		this.minimumHigh = 2147483647
+		this.minimumLow = 2147483647
+	}
+
+	/**
+	 * Resolves pull-ups and measures each completed SCL phase in context ticks.
+	 */
+	process Observe()
+	{
+		state {
+			this.scl = ~this.scl_drive_low
+			this.sda = ~this.sda_drive_low
+			var low = this.scl_drive_low == 0b1
+
+			if (low != this.previousLow) {
+				if (this.edges > 0) {
+					if (this.previousLow && this.phaseTicks < this.minimumLow) {
+						this.minimumLow = this.phaseTicks
+					}
+
+					if (!this.previousLow && this.phaseTicks < this.minimumHigh) {
+						this.minimumHigh = this.phaseTicks
+					}
+				}
+
+				this.edges++
+				this.phaseTicks = 0
+			}
+
+			this.previousLow = low
+			this.phaseTicks++
+		}
+	}
+
+	/**
+	 * Returns the shortest completed SCL high phase observed so far.
+	 */
+	public fn MinimumHigh() int
+	{
+		return this.minimumHigh
+	}
+
+	/**
+	 * Returns the shortest completed SCL low phase observed so far.
+	 */
+	public fn MinimumLow() int
+	{
+		return this.minimumLow
+	}
+
+	/**
+	 * Returns the number of observed SCL drive transitions.
+	 */
+	public fn Edges() int
+	{
+		return this.edges
+	}
+}

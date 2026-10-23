@@ -1,0 +1,75 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Models a target holding SCL low and measures elapsed context cycles.
+ */
+component I2CTimeoutBus : I2CBus
+{
+	// Simulated target hold and elapsed context ticks.
+	stretched: bool
+	ticks: uint
+
+	/**
+	 * Starts with the simulated target holding SCL low.
+	 */
+	new()
+	{
+		this.stretched = true
+	}
+
+	/**
+	 * Resolves open-drain requests while optionally simulating a clock-stretching target.
+	 */
+	process Resolve()
+	{
+		state {
+			this.ticks++
+
+			if (this.stretched) {
+				this.scl = 0b0
+			} else {
+				this.scl = ~this.scl_drive_low
+			}
+
+			this.sda = ~this.sda_drive_low
+		}
+	}
+
+	/**
+	 * Releases the simulated target clock hold; the master may still drive SCL low.
+	 */
+	public fn ReleaseClock()
+	{
+		state {
+			this.stretched = false
+		}
+	}
+
+	/**
+	 * Makes the simulated target hold SCL low until explicitly released.
+	 */
+	public fn HoldClock()
+	{
+		state {
+			this.stretched = true
+		}
+	}
+
+	/**
+	 * Returns the elapsed fixture clock ticks.
+	 */
+	public fn Ticks() uint
+	{
+		return this.ticks
+	}
+
+	/**
+	 * Reports whether the master has released both open-drain drive requests.
+	 */
+	public fn LinesReleased() bool
+	{
+		return this.scl_drive_low == 0b0 && this.sda_drive_low == 0b0
+	}
+}

@@ -37,8 +37,8 @@ Neither selects timing or changes reset behavior. An asynchronous read contract
 may be incompatible with a device's block RAM regardless of its style hint.
 No physical allocation, LUT/FF count or Fmax is claimed.
 
-[Native verification](../verification/memory/README.md) checks timing, indexed
-writes, style attributes, bounds, reset cancellation and retained payloads.
+The [memory regression tests](../tests/memory) provide executable examples of
+the storage APIs and their expected behavior.
 `Ram16`/`Ram32` retain their scheduled API, not the old internal primitive's
 registered-address timing. Byte masks and zero-filled startup are not part of
 the new contract.
@@ -72,8 +72,9 @@ Baud arguments must be positive integral static values and are checked by the co
 an inadequate clock-to-baud ratio is not currently rejected automatically.
 
 Do not pass a calculated runtime tick count or modify RX/TX constants. See the
-[timing verification contract](../verification/uart-timing/README.md) for measured
-latencies, low-ratio characterization, and synthesis costs.
+[baud configuration tests](../tests/uart/UartBaudConfigurationTest.lvt) for
+executable configuration examples. Physical timing and resource costs must be
+checked for the target design.
 
 ## FIFO Behavior
 
@@ -159,16 +160,18 @@ Usage examples and known limitations are collected in [`i2c.md`](i2c.md).
 `I2CMaster` and `I2CSlave` are present in one simulation or design. Additional
 targets will need either cascaded combiners or a future wider resolved-line abstraction.
 
-`I2CMaster` is fixed to standard-mode timing in this release:
+`I2CMaster<BUS_FREQUENCY, STRETCH_TIMEOUT>` derives timing from its inherited
+clock context. Defaults are 100000Hz and 1ms. At 50 MHz the default phase count
+is 250 ticks; at 100 MHz it is 500. State-machine and input-sampling overhead
+can extend these phases. Frequencies are restricted to standard mode (at most
+100 kHz); the selected rate is an upper bound.
 
-- source clock: 100 MHz
-- I2C rate: 100 kHz
-- half-period: 500 clock ticks
-
-The master releases SCL for high phases and counts high-phase time only while
-the observed SCL line is high, which gives basic clock-stretch tolerance. This
-release is intentionally single-master, 7-bit-address, and byte-oriented. It does not
-include arbitration, 10-bit addressing, multi-master recovery, or generic timing.
+Released-SCL waits are bounded by the configured timeout. Expiry releases both
+lines, ends the command, and sets `HasTimedOut()` without reporting ACK or NACK.
+Callers must check this result before consuming data. A subsequent accepted
+command clears the error. There is no recovery-pulse sequence, arbitration,
+10-bit addressing, or multi-controller recovery. See [I2C](i2c.md) for details.
+These configurable settings are available starting with Livt.IO 1.3.0.
 
 `I2CSlave` is a byte-event target. It matches one 7-bit address, exposes
 received bytes through `HasReceivedByte()` / `GetReceivedByte()`, and transmits

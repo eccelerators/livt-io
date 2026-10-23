@@ -1,0 +1,46 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Checks both the inherited clock and selected rate against measured SCL phases.
+ */
+@Test
+@Context(ClockFrequency = 100MHz)
+component I2CDefaultTimingTest
+{
+	// Owned fixture and controller share the annotated clock/reset context.
+	bus: I2CTimingBus
+	master: I2CMaster<100000Hz>
+
+	/**
+	 * Owns the observing bus and master in this test clock context.
+	 */
+	new()
+	{
+		this.bus = new I2CTimingBus()
+		this.master = new I2CMaster<100000Hz>(this.bus)
+	}
+
+	/**
+	 * Checks measured wire phases and NACK completion for the configured clock and rate.
+	 */
+	@Test
+	fn MeasuresConfiguredClockPhases()
+	{
+		assert this.master.HalfPeriodTicks() == 500
+		assert this.master.BeginWriteByte(0xA5)
+
+		while (this.master.IsBusy()) {
+			state {}
+		}
+
+		assert this.master.HasResult()
+		assert this.master.WasNackReceived()
+		assert this.bus.Edges() == 19
+		assert this.bus.MinimumLow() >= 500
+		assert this.bus.MinimumLow() < 500 + 20
+		assert this.bus.MinimumHigh() >= 500
+		assert this.bus.MinimumHigh() < 500 + 20
+	}
+}

@@ -1,6 +1,6 @@
 [project]
 name = "Livt.IO"
-version = "1.2.0"
+version = "1.3.0"
 path = "src"
 outdir = "out"
 
@@ -33,6 +33,11 @@ components = [
     "I2COpenDrainPinsTest",
     "I2CBusCombinerTest",
     "I2CMasterTest",
+    "I2CTimeoutTest",
+    "I2CConfiguredTimeoutTest",
+    "I2CDefaultTimingTest",
+    "I2CSlowContextTimingTest",
+    "I2CConfiguredTimingTest",
     "I2CSlaveTest",
     "I2CRegisterSlaveTest",
     "I2CIntegrationTest",

@@ -1,0 +1,98 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Bounds stretching, releases the bus, and allows another transaction after failure.
+ */
+@Test
+@Context(ClockFrequency = 50MHz)
+component I2CTimeoutTest
+{
+	// Owned fixture and controller share the annotated clock/reset context.
+	bus: I2CTimeoutBus
+	master: I2CMaster<100000Hz, 20us>
+
+	/**
+	 * Owns the observing bus and master in this test clock context.
+	 */
+	new()
+	{
+		this.bus = new I2CTimeoutBus()
+		this.master = new I2CMaster<100000Hz, 20us>(this.bus)
+	}
+
+	/**
+	 * Waits for completion with a bounded polling loop so a regression cannot hang the test.
+	 */
+	fn WaitForCommand()
+	{
+		var attempts = 0
+
+		while (this.master.IsBusy() && attempts < 20000) {
+			state {
+				attempts++
+			}
+		}
+
+		assert !this.master.IsBusy()
+	}
+
+	/**
+	 * Checks bounded START, STOP, write and read failures followed by successful reuse.
+	 */
+	@Test
+	fn TimesOutAndRecovers()
+	{
+		for (var command = 0; command < 4; command++) {
+			this.bus.HoldClock()
+			Simulation.Wait(10)
+			var start = this.bus.Ticks()
+			var accepted = false
+
+			match (command)
+			{
+				0 =>
+				{
+					accepted = this.master.BeginStart()
+				}
+				1 =>
+				{
+					accepted = this.master.BeginStop()
+				}
+				2 =>
+				{
+					accepted = this.master.BeginWriteByte(0x00)
+				}
+				_ =>
+				{
+					accepted = this.master.BeginReadByte(false)
+				}
+			}
+
+			assert accepted
+			this.WaitForCommand()
+			var elapsed = this.bus.Ticks() - start
+			assert elapsed >= 1000
+			assert elapsed < 1700
+			assert this.master.HasResult()
+			assert this.master.HasTimedOut()
+			assert !this.master.WasAckReceived()
+			assert !this.master.WasNackReceived()
+			assert this.master.GetReadByte() == 0x00
+			assert this.bus.LinesReleased()
+
+			this.bus.ReleaseClock()
+			Simulation.Wait(10)
+			assert this.master.BeginStart()
+			assert !this.master.HasTimedOut()
+			this.WaitForCommand()
+			assert this.master.HasResult()
+			assert !this.master.HasTimedOut()
+			assert this.master.BeginStop()
+			this.WaitForCommand()
+			assert !this.master.HasTimedOut()
+			assert this.bus.LinesReleased()
+		}
+	}
+}

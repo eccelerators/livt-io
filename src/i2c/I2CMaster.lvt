@@ -1,15 +1,28 @@
 namespace Livt.IO
 
 /**
- * Byte-level, single-controller I2C master for standard-mode timing.
+ * Byte-level, single-controller I2C master with context-derived standard-mode timing.
+ * Borrows an open-drain bus and inherits the consumer clock/reset context.
+ * One serialized caller owns commands. Begin methods report acceptance; HasResult
+ * reports completion. Reset releases drive requests and clears pending results.
+ * A stretch timeout releases both lines without emitting recovery clock pulses.
  */
-component I2CMaster
+component I2CMaster<BUS_FREQUENCY: Frequency = 100000Hz,
+	STRETCH_TIMEOUT: Time = 1ms>
 {
-	// Fixed standard-mode timing and supported address range.
-	public const CLOCK_HZ: int = 100000000
-	public const I2C_HZ: int = 100000
-	public const TICKS_PER_HALF_PERIOD: int = 500
+	static assert BUS_FREQUENCY >= 1Hz && BUS_FREQUENCY <= 100000Hz,
+		"I2C bus frequency must be between 1 Hz and 100 kHz (standard mode)"
+
+	static assert STRETCH_TIMEOUT >= 1ns, "I2C clock-stretch timeout must be positive"
+
+	// Supported unshifted device address range.
 	public const MAX_7_BIT_ADDRESS: byte = 0x7F
+
+	// The consumer selects the bus rate; its inherited context supplies the clock.
+	public const TICKS_PER_HALF_PERIOD: int = ((this.context.TicksPer(BUS_FREQUENCY) + 1) / 2) as int
+
+	// Maximum consecutive observed-low cycles while the master releases SCL.
+	const STRETCH_TIMEOUT_TICKS: uint = this.context.TicksFor(STRETCH_TIMEOUT)
 
 	// Command codes consumed by the byte-transfer state machine.
 	const COMMAND_NONE: int = 0
@@ -24,6 +37,7 @@ component I2CMaster
 	// Completion status and result retained for the caller.
 	busy: bool
 	hasResult: bool
+	timedOut: bool
 	resultAck: bool
 	resultByte: byte
 
@@ -40,7 +54,7 @@ component I2CMaster
 
 	/**
 	 * Borrows the open-drain bus, releases both lines, and starts idle with no result. Timing
-	 * assumes a 100 MHz clock; use one serialized command owner.
+	 * derives from the inherited context and BUS_FREQUENCY; use one serialized command owner.
 	 */
 	new(bus: flip I2CBus)
 	{
@@ -49,6 +63,7 @@ component I2CMaster
 		this.bus.sda_drive_low = 0b0
 		this.busy = false
 		this.hasResult = false
+		this.timedOut = false
 		this.resultAck = false
 		this.resultByte = 0x00
 		this.currentByte = 0x00
@@ -58,6 +73,15 @@ component I2CMaster
 		this.command = COMMAND_NONE
 		this.observedScl = 0b1
 		this.observedSda = 0b1
+	}
+
+	/**
+	 * Returns the context-derived minimum phase count. State transitions and observed
+	 * SCL synchronization can extend wire timing; BUS_FREQUENCY is a rate ceiling.
+	 */
+	public fn HalfPeriodTicks() int
+	{
+		return TICKS_PER_HALF_PERIOD
 	}
 
 	/**
@@ -73,6 +97,7 @@ component I2CMaster
 		state {
 			this.busy = true
 			this.hasResult = false
+			this.timedOut = false
 			this.command = COMMAND_START
 			this.tickCount = 0
 		}
@@ -93,6 +118,7 @@ component I2CMaster
 		state {
 			this.busy = true
 			this.hasResult = false
+			this.timedOut = false
 			this.command = COMMAND_STOP
 			this.tickCount = 0
 		}
@@ -113,6 +139,7 @@ component I2CMaster
 		state {
 			this.busy = true
 			this.hasResult = false
+			this.timedOut = false
 			this.resultAck = false
 			this.currentByte = data
 			this.bitIndex = 0
@@ -143,6 +170,7 @@ component I2CMaster
 		state {
 			this.busy = true
 			this.hasResult = false
+			this.timedOut = false
 			this.resultAck = false
 			this.currentByte = writeAddress
 			this.bitIndex = 0
@@ -173,6 +201,7 @@ component I2CMaster
 		state {
 			this.busy = true
 			this.hasResult = false
+			this.timedOut = false
 			this.resultAck = false
 			this.currentByte = readAddress
 			this.bitIndex = 0
@@ -196,6 +225,7 @@ component I2CMaster
 		state {
 			this.busy = true
 			this.hasResult = false
+			this.timedOut = false
 			this.resultByte = 0x00
 			this.sendAck = sendAck
 			this.bitIndex = 0
@@ -224,6 +254,16 @@ component I2CMaster
 	}
 
 	/**
+	 * Reports that the completed command exceeded STRETCH_TIMEOUT while waiting for
+	 * released SCL to rise. Both drive requests are released; a new command clears
+	 * this status. This does not generate recovery pulses for a stuck target.
+	 */
+	public fn HasTimedOut() bool
+	{
+		return this.timedOut
+	}
+
+	/**
 	 * Returns ACK status for the completed write-byte/address command. Valid only after
 	 * HasResult for that command.
 	 */
@@ -233,12 +273,12 @@ component I2CMaster
 	}
 
 	/**
-	 * Returns the inverse of the retained ACK flag. Interpret as a received NACK only after a
-	 * completed write-byte/address command.
+	 * Reports NACK for a completed write-byte/address command. A clock-stretch timeout
+	 * is a separate failure and returns false; inspect HasTimedOut after HasResult.
 	 */
 	public fn WasNackReceived() bool
 	{
-		return this.resultAck == false
+		return this.resultAck == false && !this.timedOut
 	}
 
 	/**
@@ -251,13 +291,14 @@ component I2CMaster
 	}
 
 	/**
-	 * Clears retained completion and ACK status without canceling the active command or
+	 * Clears retained completion, timeout and ACK status without canceling the active command or
 	 * clearing the received byte.
 	 */
 	public fn ClearResult()
 	{
 		state {
 			this.hasResult = false
+			this.timedOut = false
 			this.resultAck = false
 		}
 	}
@@ -276,10 +317,12 @@ component I2CMaster
 
 	/**
 	 * Executes accepted byte commands with standard-mode phase timing. Waits for released SCL
-	 * to rise, retaining bus drive between commands; no clock-stretch timeout is provided.
+	 * to rise, retaining bus drive between commands. A clock-stretch timeout releases
+	 * both lines and completes with HasTimedOut set; no recovery pulses are emitted.
 	 */
 	process Main()
 	{
+		var stretchTicks: uint = 0
 		var phaseTick: int = 0
 		var phaseBit: int = 0
 		var heldSclDriveLow: logic = 0b0
@@ -287,6 +330,7 @@ component I2CMaster
 		var commandInFlight: bool = false
 
 		state Idle {
+			stretchTicks = 0
 			phaseTick = 0
 			phaseBit = 0
 			this.bus.scl_drive_low = heldSclDriveLow
@@ -324,6 +368,8 @@ component I2CMaster
 			this.bus.sda_drive_low = heldSdaDriveLow
 
 			if (this.observedScl == 0b1) {
+				stretchTicks = 0
+
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
 					goto StartSetup
@@ -333,7 +379,13 @@ component I2CMaster
 				}
 			} else {
 				phaseTick = 0
-				goto StartRelease
+				stretchTicks++
+
+				if (stretchTicks >= STRETCH_TIMEOUT_TICKS) {
+					goto ClockTimeout
+				} else {
+					goto StartRelease
+				}
 			}
 		}
 
@@ -344,6 +396,8 @@ component I2CMaster
 			this.bus.sda_drive_low = heldSdaDriveLow
 
 			if (this.observedScl == 0b1) {
+				stretchTicks = 0
+
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
 					goto StartSclLow
@@ -353,7 +407,13 @@ component I2CMaster
 				}
 			} else {
 				phaseTick = 0
-				goto StartSetup
+				stretchTicks++
+
+				if (stretchTicks >= STRETCH_TIMEOUT_TICKS) {
+					goto ClockTimeout
+				} else {
+					goto StartSetup
+				}
 			}
 		}
 
@@ -397,6 +457,8 @@ component I2CMaster
 			this.bus.sda_drive_low = heldSdaDriveLow
 
 			if (this.observedScl == 0b1) {
+				stretchTicks = 0
+
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
 					goto StopRelease
@@ -406,7 +468,13 @@ component I2CMaster
 				}
 			} else {
 				phaseTick = 0
-				goto StopSclHigh
+				stretchTicks++
+
+				if (stretchTicks >= STRETCH_TIMEOUT_TICKS) {
+					goto ClockTimeout
+				} else {
+					goto StopSclHigh
+				}
 			}
 		}
 
@@ -458,6 +526,8 @@ component I2CMaster
 			this.bus.sda_drive_low = heldSdaDriveLow
 
 			if (this.observedScl == 0b1) {
+				stretchTicks = 0
+
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
 
@@ -473,7 +543,13 @@ component I2CMaster
 				}
 			} else {
 				phaseTick = 0
-				goto WriteBitHigh
+				stretchTicks++
+
+				if (stretchTicks >= STRETCH_TIMEOUT_TICKS) {
+					goto ClockTimeout
+				} else {
+					goto WriteBitHigh
+				}
 			}
 		}
 
@@ -499,6 +575,8 @@ component I2CMaster
 			this.bus.sda_drive_low = heldSdaDriveLow
 
 			if (this.observedScl == 0b1) {
+				stretchTicks = 0
+
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					this.resultAck = (this.observedSda == 0b0)
 					phaseTick = 0
@@ -509,7 +587,13 @@ component I2CMaster
 				}
 			} else {
 				phaseTick = 0
-				goto WriteAckHigh
+				stretchTicks++
+
+				if (stretchTicks >= STRETCH_TIMEOUT_TICKS) {
+					goto ClockTimeout
+				} else {
+					goto WriteAckHigh
+				}
 			}
 		}
 
@@ -553,6 +637,8 @@ component I2CMaster
 			this.bus.sda_drive_low = heldSdaDriveLow
 
 			if (this.observedScl == 0b1) {
+				stretchTicks = 0
+
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					phaseTick = 0
 					goto ReadBitSample
@@ -562,7 +648,13 @@ component I2CMaster
 				}
 			} else {
 				phaseTick = 0
-				goto ReadBitHigh
+				stretchTicks++
+
+				if (stretchTicks >= STRETCH_TIMEOUT_TICKS) {
+					goto ClockTimeout
+				} else {
+					goto ReadBitHigh
+				}
 			}
 		}
 
@@ -573,6 +665,7 @@ component I2CMaster
 			this.bus.sda_drive_low = heldSdaDriveLow
 
 			if (this.observedScl == 0b1) {
+				stretchTicks = 0
 				var sampledBit: int = 0
 
 				if (this.observedSda == 0b1) {
@@ -591,7 +684,13 @@ component I2CMaster
 				}
 			} else {
 				phaseTick = 0
-				goto ReadBitHigh
+				stretchTicks++
+
+				if (stretchTicks >= STRETCH_TIMEOUT_TICKS) {
+					goto ClockTimeout
+				} else {
+					goto ReadBitHigh
+				}
 			}
 		}
 
@@ -622,6 +721,8 @@ component I2CMaster
 			this.bus.sda_drive_low = heldSdaDriveLow
 
 			if (this.observedScl == 0b1) {
+				stretchTicks = 0
+
 				if (phaseTick >= TICKS_PER_HALF_PERIOD) {
 					heldSdaDriveLow = 0b0
 					this.bus.sda_drive_low = heldSdaDriveLow
@@ -633,7 +734,13 @@ component I2CMaster
 				}
 			} else {
 				phaseTick = 0
-				goto SendAckHigh
+				stretchTicks++
+
+				if (stretchTicks >= STRETCH_TIMEOUT_TICKS) {
+					goto ClockTimeout
+				} else {
+					goto SendAckHigh
+				}
 			}
 		}
 
@@ -653,6 +760,21 @@ component I2CMaster
 				phaseTick = phaseTick + 1
 				goto SendAckFinishLow
 			}
+		}
+
+		// One failure path releases the bus and preserves a distinct completion reason.
+		state ClockTimeout {
+			heldSclDriveLow = 0b0
+			heldSdaDriveLow = 0b0
+			this.bus.scl_drive_low = 0b0
+			this.bus.sda_drive_low = 0b0
+			this.busy = false
+			this.hasResult = true
+			this.timedOut = true
+			this.resultAck = false
+			this.resultByte = 0x00
+			this.command = COMMAND_NONE
+			goto Idle
 		}
 	}
 }

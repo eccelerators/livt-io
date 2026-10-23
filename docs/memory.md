@@ -95,7 +95,7 @@ tie after reset); a read reserves a
 following edge to capture the response. Reset cancels pending calls. Already
 committed writes remain committed; cancellation does not roll back storage.
 Method dispatch costs more cycles than the storage edge contract. See the
-[measured latency checks](../verification/memory/README.md).
+[memory regression tests](../tests/memory) for executable API examples.
 
 ## Storage intent and custom providers
 

@@ -5,7 +5,9 @@ It combines byte- and word-addressable memory, UART serial I/O, Ethernet, and pr
 helpers into one package so applications can depend on `Livt.IO` instead of
 separate `Ram` or `Uart` packages.
 
-The 1.2.0 package surface is intentionally small and hardware-oriented:
+See [CHANGELOG.md](CHANGELOG.md) for release notes and migration details.
+
+The 1.3.0 package surface is intentionally small and hardware-oriented:
 
 - `Livt.IO.Ram<T, CAPACITY, STYLE>`: scheduled element-addressable memory implementing `IRam<T>`.
 - `Livt.IO.BlockRam<T, CAPACITY>` / `DistributedRam<T, CAPACITY>`: inherited storage-style specializations.
@@ -26,6 +28,8 @@ The 1.2.0 package surface is intentionally small and hardware-oriented:
 - `Livt.IO.I2COpenDrainPins`: adapter from physical `inout` pins to `I2CBus`.
 - `Livt.IO.I2CBusCombiner`: wired-AND combiner for one controller and one target.
 - `Livt.IO.I2CMaster`: byte-level standard-mode I2C master.
+  Version 1.3.0 adds consumer-selected frequency and clock-stretch
+  timeout; see [I2C timing and recovery](docs/i2c.md#consumer-selected-timing).
 - `Livt.IO.I2CSlave`: byte-event standard-mode I2C target.
 - `Livt.IO.I2CRegisterSlave`: 256-byte register-file helper for I2C targets.
 - `Livt.IO.EthernetReceiver` / `EthernetTransmitter`: RAM-backed Ethernet frame reception and transmission.
@@ -39,7 +43,7 @@ The 1.2.0 package surface is intentionally small and hardware-oriented:
 
 ```toml
 [dependencies]
-Livt.IO = "1.2.0"
+Livt.IO = "1.3.0"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
@@ -126,7 +130,7 @@ code needs live observations.
 storage intent. Inheritance binds configuration without changing the access contract.
 
 See [usage and migration](docs/memory.md) and
-[contracts, measured latency, and verification](verification/memory/README.md).
+[memory regression tests](tests/memory).
 The former nongeneric `Ram.ReadByte/WriteByte` API and opaque `InternalRam*`
 primitives are removed; this is an explicit API/startup migration.
 
@@ -158,9 +162,9 @@ are component value parameters, static specialization removes unselected frame
 branches instead of adding runtime format selectors.
 
 Named constants and forwarded const parameters are supported; runtime baud
-changes are not. The validated clock/baud combinations, rounding error, sampling
-limits, and reproducible measurements are documented in
-[`verification/uart-timing/README.md`](verification/uart-timing/README.md).
+changes are not. See [UART hardware notes](docs/hardware-notes.md#uart)
+and the [baud configuration tests](tests/uart/UartBaudConfigurationTest.lvt)
+for timing guidance and executable examples.
 
 `UartReceiver` pulses `rx_dv` for one cycle after a valid byte and pulses
 `rx_frame_error` for one cycle after an invalid parity or stop bit. `UartTransmitter`
@@ -238,11 +242,14 @@ requirements.
 
 ### I2C
 
-I2C support is v1 byte-level and fixed to standard mode:
+I2C support is byte-level and standard-mode. The 1.3.0 master accepts
+`I2CMaster<BUS_FREQUENCY: Frequency = 100000Hz, STRETCH_TIMEOUT: Time = 1ms>`.
+Timing derives from the consumer clock context; fixed `CLOCK_HZ` / `I2C_HZ`
+constants are replaced by configuration and `HalfPeriodTicks()`. Version 1.2.0 used fixed 100 MHz / 100 kHz timing.
 
-- `I2CMaster.CLOCK_HZ = 100000000`
-- `I2CMaster.I2C_HZ = 100000`
-- `I2CMaster.TICKS_PER_HALF_PERIOD = 500`
+Clock-stretch timeout releases both lines and completes with `HasTimedOut()`;
+callers must check it before ACK/NACK or byte data. A new accepted command clears
+the timeout. Automatic recovery clock pulses are not provided.
 
 `I2CBus` models an open-drain bus attachment. The provider exposes observed
 `scl` and `sda` levels, while devices request low drive through
@@ -255,7 +262,7 @@ I2C support is v1 byte-level and fixed to standard mode:
 - `BeginWriteByte(data)`
 - `BeginWriteAddress(address)`, `BeginReadAddress(address)`
 - `BeginReadByte(sendAck)`
-- `IsBusy()`, `HasResult()`, `ClearResult()`
+- `IsBusy()`, `HasResult()`, `HasTimedOut()`, `ClearResult()`
 - `WasAckReceived()`, `WasNackReceived()`, `GetReadByte()`
 
 Address helpers take unshifted 7-bit addresses in the range `0x00..0x7F` and

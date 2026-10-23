@@ -14,6 +14,49 @@ I2C is modeled as open drain. Components do not drive `1`; they either request a
 low level through `scl_drive_low` / `sda_drive_low` or release the line and
 observe `scl` / `sda`.
 
+## Consumer-selected timing
+
+The master takes compile-time parameters `BUS_FREQUENCY: Frequency = 100000Hz`
+and `STRETCH_TIMEOUT: Time = 1ms`. It derives phase and timeout counts from its
+inherited clock context, just as UART derives bit timing from its baud rate.
+The supported bus-frequency range is 1 Hz through 100 kHz (standard mode).
+
+For example, a camera wrapper can forward both settings:
+
+```livt
+using Livt.IO
+
+component CameraRegisterBus<BUS_FREQUENCY: Frequency = 100000Hz,
+    STRETCH_TIMEOUT: Time = 1ms>
+{
+    master: I2CMaster<BUS_FREQUENCY, STRETCH_TIMEOUT>
+
+    new(bus: flip I2CBus)
+    {
+        this.master = new I2CMaster<BUS_FREQUENCY, STRETCH_TIMEOUT>(bus)
+    }
+    // Camera-specific 16-bit register transactions delegate byte commands here.
+}
+```
+
+A consumer may instantiate `CameraRegisterBus<50000Hz, 2ms>` in its clock context.
+At 50 MHz, the default 100 kHz rate uses a 250-tick phase count; at 100 MHz it
+uses 500 ticks. `HalfPeriodTicks()` exposes the derived count. State transitions,
+line sampling and clock stretching lengthen wire periods, so the selected bus
+frequency is a ceiling, not a guarantee of exact throughput.
+
+The timeout bounds each continuous wait for released SCL to be observed high;
+it is not a deadline for the whole transaction. On expiry the master releases
+both low-drive requests, clears the ACK/data result, completes the command and
+sets `HasTimedOut()`. `WasAckReceived()` and `WasNackReceived()` both return
+false for that timeout. Check timeout status before consuming byte results.
+A newly accepted command or `ClearResult()` clears timeout status. A new command
+can proceed once the target releases SCL; a still-stuck clock times out again.
+The controller does not generate recovery pulses or guarantee STOP on a stuck bus.
+
+These settings are available in 1.3.0. Version 1.2.0 used fixed timing and had
+no clock-stretch timeout. See the [migration notes](../CHANGELOG.md#upgrading-from-120).
+
 ## Physical Pins
 
 Use `I2COpenDrainPins` when a component is connected to board-level `scl` and
@@ -63,7 +106,8 @@ component LocalI2CTestRig
 
 `I2CMaster` is asynchronous. Each `Begin*` method starts one bus command and
 returns `false` if another command is already running. After a command starts,
-wait until `HasResult()` is true, consume the result, and call `ClearResult()`
+wait until `HasResult()` is true, check `HasTimedOut()`, consume a successful
+result, and call `ClearResult()`
 before starting the next command. Address helpers take unshifted 7-bit addresses
 in the range `0x00..0x7F`; `BeginWriteAddress` and `BeginReadAddress` return
 `false` for invalid addresses.
@@ -248,7 +292,7 @@ register.
 The current I2C components are reusable library building blocks, not a complete
 implementation of every I2C mode.
 
-- Timing is fixed to 100 MHz source clock and 100 kHz standard mode.
+- Timing inherits the consumer clock and supports configurable standard-mode rates.
 - Only 7-bit addressing is implemented. Master address helpers reject values
   above `0x7F`; target constructors store the low seven address bits.
 - The master is single-controller; it does not implement arbitration or
@@ -256,7 +300,8 @@ implementation of every I2C mode.
 - 10-bit addressing is not implemented.
 - High-speed mode, fast mode, and fast-mode plus timing are not configurable yet.
 - Clock stretching is handled by counting SCL high time only while observed SCL
-  is high, but there is no timeout or bus-recovery policy.
+  is high. A configurable timeout releases the lines, but automatic bus-recovery
+  pulses are not implemented.
 - `I2CBusCombiner` currently models one controller-side and one target-side
   attachment. More targets need cascaded combiners or a future resolved-line bus
   helper.
@@ -267,9 +312,8 @@ implementation of every I2C mode.
 
 Useful future improvements:
 
-- Generic timing constants or clock-frequency configuration.
 - Multi-target bus helper with an array or variadic attachment style.
-- Optional clock-stretch timeout and bus recovery.
+- Optional recovery clock pulses for stuck targets.
 - Optional 10-bit addressing support.
 - Transaction-level master helpers for common register read/write sequences.
 - Wider or typed register-file helpers built on `I2CSlave`.
