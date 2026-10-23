@@ -1,0 +1,167 @@
+namespace Livt.IO
+
+/**
+ * Full-duplex MII media adapter: 50 MHz MAC context and independent PHY-derived
+ * RX/TX contexts (25 MHz at 100 Mb/s, 2.5 MHz at 10 Mb/s). Both rates use identical
+ * nibble logic. Owns two block-memory FIFOs. TX buffers one complete wire frame
+ * before commit; completion means TX_EN has fallen, not merely FIFO admission.
+ * All three resets must assert together, asynchronously, and release locally.
+ * Board constraints must cover FIFO Gray buses and mailbox synchronizers.
+ */
+@Context(ClockFrequency = 50MHz, ResetStyle = ResetStyle.Asynchronous)
+component MiiAdapter : IEthernetMedia
+{
+	// FIFO token flag marking the final TX byte or RX terminator.
+	const FRAME_END: logic[11] = 0x200
+
+	// FIFO token flag marking the first RX byte.
+	const FRAME_START: logic[11] = 0x100
+
+	// FIFO token flag marking a malformed RX frame.
+	const FRAME_ERROR: logic[11] = 0x400
+
+	// Reserve one of 2048 FIFO entries when committing or aborting a frame.
+	const LAST_BUFFER_INDEX: logic[11] = 2046
+
+	// Borrowed PHY clock contexts; both resets assert with the MAC reset.
+	@Context(ResetStyle = ResetStyle.Asynchronous)
+	receiveDomain: IContext
+
+	// Borrowed PHY clock contexts; both resets assert with the MAC reset.
+	@Context(ResetStyle = ResetStyle.Asynchronous)
+	transmitDomain: IContext
+
+	// Borrowed physical pins and coherent link status.
+	pins: IMiiPins
+	link: IEthernetLinkStatus
+
+	// Owned receive/serialize engines and block-memory clock bridges.
+	receive: MiiReceiver
+	transmit: MiiTransmitter
+	rxQueue: MiiClockBridge<2048>
+	txQueue: MiiClockBridge<2048>
+
+	// Complete-frame mailbox and producer occupancy.
+	commit: bool
+	discard: bool
+	busy: bool
+	count: logic[11]
+
+	// Four application cycles preserve the existing MAC synchronous-RAM byte cadence.
+	byteSlot: logic[2]
+
+	// Two-stage completion synchronization and one-cycle MAC terminal events.
+	acknowledgeMeta: bool
+	acknowledgeSync: bool
+	terminal: bool
+	terminalFault: bool
+
+	// Combinational MAC input aliases and FIFO admission signals.
+	inputData: byte
+	inputValid: bool
+	inputFirst: bool
+	inputLast: bool
+	inputAbort: bool
+	accept: bool
+	abortFrame: bool
+	enabled: bool
+	push: bool
+	token: logic[11]
+
+	/**
+	 * Borrows pins, link status, and media clocks; keeps MAC work in this context.
+	 */
+	new(macContext: IContext, receiveContext: IContext, transmitContext: IContext,
+		pins: IMiiPins, link: IEthernetLinkStatus)
+	{
+		this.context = macContext
+		this.receiveDomain = receiveContext
+		this.transmitDomain = transmitContext
+		this.pins = pins
+		this.link = link
+		this.rxQueue = new MiiClockBridge<2048>(receiveDomain, this.context, receive.valid, receive.data, true)
+		this.txQueue = new MiiClockBridge<2048>(this.context, transmitDomain, push, token, transmit.ready)
+		this.receive = new MiiReceiver(receiveDomain, pins.rxData, pins.rxValid, pins.rxError, rxQueue.writeReady)
+		this.transmit = new MiiTransmitter(transmitDomain, commit, discard,
+			txQueue.readValid, txQueue.readData)
+	}
+
+	/**
+	 * Wires FIFO transfers and exposes one-cycle terminal events in the MAC domain.
+	 */
+	process Ports[]()
+	{
+		this.pins.txData = transmit.txData
+		this.pins.txEnable = transmit.txEnable
+		this.inputData = this.txData
+		this.inputValid = this.txValid
+		this.inputFirst = this.txFirst
+		this.inputLast = this.txLast
+		this.inputAbort = this.txAbort
+		this.enabled = link.ready && (link.speed == EthernetSpeed.Mbps100
+			|| link.speed == EthernetSpeed.Mbps10)
+		this.txReady = enabled && !busy && !inputAbort && txQueue.writeReady && byteSlot == 0
+		this.accept = enabled && !busy && !inputAbort && txQueue.writeReady && byteSlot == 0 && inputValid
+		this.abortFrame = !busy && count != 0 && (inputAbort || !enabled)
+		this.push = accept || (abortFrame && txQueue.writeReady)
+		var nextToken = inputData as logic[11]
+
+		if (inputLast || abortFrame || count == LAST_BUFFER_INDEX) {
+			nextToken = nextToken | FRAME_END
+		}
+
+		this.token = nextToken
+		this.txDone = terminal && !terminalFault
+		this.txFault = terminal && terminalFault
+		this.rxData = rxQueue.readData as byte
+		this.rxValid = enabled && rxQueue.readValid && (rxQueue.readData & FRAME_END) == 0
+		this.rxStart = enabled && rxQueue.readValid && (rxQueue.readData & FRAME_START) != 0
+		this.rxEnd = rxQueue.readValid && (rxQueue.readData & FRAME_END) != 0
+		this.rxError = rxQueue.readValid && ((rxQueue.readData & FRAME_ERROR) != 0 || !enabled)
+	}
+
+	/**
+	 * Commits complete frames and retains metadata until the remote acknowledgement.
+	 */
+	process Frames()
+	{
+		state {
+			this.byteSlot++
+			this.terminal = false
+
+			if (busy) {
+				if (!enabled || inputAbort) {
+					this.discard = true
+				}
+
+				if (acknowledgeSync == commit) {
+					this.busy = false
+					this.count = 0
+					this.terminal = true
+					this.terminalFault = transmit.fault || discard
+					this.discard = false
+				}
+			} elif (abortFrame && txQueue.writeReady) {
+				this.discard = true
+				this.commit = !commit
+				this.busy = true
+			} elif (accept) {
+				if ((count == 0 && !inputFirst) || (count != 0 && inputFirst)) {
+					this.discard = true
+				}
+
+				if (inputLast || count == LAST_BUFFER_INDEX) {
+					this.discard = discard || !inputLast
+					this.commit = !commit
+					this.busy = true
+				}
+
+				this.count++
+			}
+
+			var previous = acknowledgeMeta
+			this.acknowledgeMeta = transmit.acknowledged
+			this.acknowledgeSync = previous
+		}
+	}
+}

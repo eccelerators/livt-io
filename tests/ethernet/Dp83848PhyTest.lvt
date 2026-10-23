@@ -1,0 +1,75 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+using Livt.IO.Phy
+
+/**
+ * Owns a fresh simulation fixture; its single test exercises reset startup and frame behavior.
+ */
+@Test
+@Context(ClockFrequency = 50MHz)
+component Dp83848PhyTest
+{
+	// Owned PHY manager/register model and board startup/restart stimulus.
+	registers: Dp83848Registers
+	phy: Dp83848Phy<1, 1us>
+	startup: bool
+	restart: bool
+
+	/**
+	 * Constructs the test-owned devices and binds their clock and signal dependencies.
+	 */
+	new()
+	{
+		this.registers = new Dp83848Registers()
+		this.phy = new Dp83848Phy<1, 1us>(registers, startup, restart)
+	}
+
+	/**
+	 * Waits for bounded PHY management and polling to complete.
+	 */
+	fn Settle()
+	{
+		for (var i = 0; i < 2000; i++) {
+			state {}
+		}
+	}
+
+	/**
+	 * Exercises this scenario once from the fixture reset state and checks completion and ownership.
+	 */
+	@Test
+	fn NegotiatesBothSpeedsAndRecovers()
+	{
+		assert !phy.ready
+		this.startup = true
+		this.Settle()
+		assert phy.ready
+		assert phy.speed == EthernetSpeed.Mbps100
+		assert registers.advertisement == 0x0141
+		assert registers.mode == 0
+		this.registers.status = 0x0017
+		this.Settle()
+		assert phy.ready
+		assert phy.speed == EthernetSpeed.Mbps10
+		this.registers.status = 0x0013
+		this.Settle()
+		assert !phy.ready
+		this.registers.status = 0
+		this.Settle()
+		assert !phy.ready
+		this.registers.status = 0x0015
+		this.Settle()
+		assert phy.ready
+		this.registers.fail = true
+		this.Settle()
+		assert !phy.ready
+		this.registers.fail = false
+		this.Settle()
+		assert phy.ready
+		this.registers.wrongId = true
+		this.restart = !restart
+		this.Settle()
+		assert !phy.ready
+	}
+}

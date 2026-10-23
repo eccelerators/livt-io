@@ -1,0 +1,54 @@
+namespace Livt.IO
+
+/**
+ * Four-phase startup handshake; both domains must acknowledge clear before traffic.
+ */
+component MiiClearEndpoint
+{
+	// Borrowed remote clear level and local synchronization state.
+	remoteAcknowledged: bool
+	acknowledgeMeta: bool
+	acknowledgeSync: bool
+	phase: logic[2]
+
+	// Local clear request and permission to accept traffic.
+	public clear: out bool
+	public active: out bool
+
+	/**
+	 * Binds the local clock/reset context and borrows the remote clear acknowledgement.
+	 */
+	new(domain: IContext, remoteAcknowledged: bool)
+	{
+		this.context = domain
+		this.remoteAcknowledged = remoteAcknowledged
+	}
+
+	/**
+	 * Exposes the current clear request and permits traffic only after the full startup handshake.
+	 */
+	process Ports[]()
+	{
+		this.clear = phase == 0
+		this.active = phase == 2 && context.rst == 0b0
+	}
+
+	/**
+	 * Synchronizes the remote acknowledgement through two stages before advancing the four-phase handshake.
+	 */
+	process Advance()
+	{
+		state {
+			// Read the previous synchronized level before advancing the two stages.
+			if (phase == 0 && acknowledgeSync) {
+				this.phase = 1
+			} elif (phase == 1 && !acknowledgeSync) {
+				this.phase = 2
+			}
+
+			var previous = acknowledgeMeta
+			this.acknowledgeMeta = remoteAcknowledged
+			this.acknowledgeSync = previous
+		}
+	}
+}

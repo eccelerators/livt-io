@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.4.0
+
+### Added
+
+- Full-duplex MII media adapter with independent PHY RX/TX clocks, block-memory
+  asynchronous FIFOs, complete-frame TX commit, and 10/100 Mb/s operation.
+- DP83848 PHY identification, MII selection, full-duplex negotiation, link/speed
+  monitoring, bounded reset polling, and retry after MDIO errors.
+- Livt tests for both media clock rates, repeated frames, abort/reuse, malformed
+  receive events, overflow, and PHY recovery. Board qualification remains separate.
+
+### Compatibility and dependencies
+
+- Existing MAC, RMII, UART, I2C, SPI, and RAM APIs remain unchanged.
+- Use `Livt.Collections 1.4.0` for the asynchronous FIFO implementation.
+- MII requires a 50 MHz MAC context, separate PHY RX/TX contexts, coordinated
+  asynchronous reset assertion, local reset release, and board CDC/I/O constraints.
+- Full duplex only; no half-duplex collision handling or pause-frame flow control.
+
+### Validation
+
+- Five focused IO tests pass, plus two full-frame Livt.Net integration tests
+  covering 10 and 100 Mb/s, exact payload bytes, FCS, and ownership release.
+- These are simulation results. FPGA resource mapping, board timing, and live
+  MII hardware operation are not yet qualified.
+
+### Changed
+
+- Keep MII fixtures and helpers as ordinary files under `tests/`, registered in
+  the package test catalog; remove development-only verification projects.
+
 ## 1.3.0
 
 ### Added

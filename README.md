@@ -7,7 +7,7 @@ separate `Ram` or `Uart` packages.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and migration details.
 
-The 1.3.0 package surface is intentionally small and hardware-oriented:
+The 1.4.0 package surface is intentionally small and hardware-oriented:
 
 - `Livt.IO.Ram<T, CAPACITY, STYLE>`: scheduled element-addressable memory implementing `IRam<T>`.
 - `Livt.IO.BlockRam<T, CAPACITY>` / `DistributedRam<T, CAPACITY>`: inherited storage-style specializations.
@@ -33,7 +33,9 @@ The 1.3.0 package surface is intentionally small and hardware-oriented:
 - `Livt.IO.I2CSlave`: byte-event standard-mode I2C target.
 - `Livt.IO.I2CRegisterSlave`: 256-byte register-file helper for I2C targets.
 - `Livt.IO.EthernetReceiver` / `EthernetTransmitter`: RAM-backed Ethernet frame reception and transmission.
-- `Livt.IO.RmiiAdapter`: 100 Mbit/s full-duplex RMII media adapter.
+- `Livt.IO.RmiiAdapter<ENABLE_10>`: full-duplex RMII media adapter; 100 Mbit/s by default, optional 10 Mbit/s.
+- `Livt.IO.MiiAdapter`: full-duplex 10/100 Mbit/s MII with independent RX/TX clocks.
+- `Livt.IO.Phy.Dp83848Phy`: DP83848 identification, MII configuration, and 10/100-full link management.
 - `Livt.IO.MdioController`: serialized Clause 22 PHY register access.
 - `Livt.IO.Phy.Rtl8201Phy` / `Rtl8211Phy`: PHY configuration and link monitoring.
 - `Livt.IO.SPIBus`: push-pull, single-data-lane SPI bus contract.
@@ -43,7 +45,7 @@ The 1.3.0 package surface is intentionally small and hardware-oriented:
 
 ```toml
 [dependencies]
-Livt.IO = "1.3.0"
+"Livt.IO" = "1.4.0"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
@@ -85,7 +87,9 @@ in `Livt.IO`.
 | `I2CRegisterSlave` | Yes | 256-byte register-file helper built on `I2CSlave` |
 | `EthernetReceiver<CAPACITY, PROMISCUOUS>` | Yes | Buffered frame reception, FCS validation, filtering and discard counters |
 | `EthernetTransmitter<CAPACITY>` | Yes | Buffered frame transmission, padding, FCS and retained completion |
-| `RmiiAdapter<ENABLE_10>` | Yes | RMII serialization and byte assembly; supported mode is 100 Mbit/s full duplex |
+| `RmiiAdapter<ENABLE_10>` | Yes | RMII serialization and byte assembly; optional 10 Mbit/s mode |
+| `MiiAdapter` | Yes | 10/100 Mbit/s full-duplex MII with complete-frame TX buffering and asynchronous FIFOs |
+| `Phy.Dp83848Phy<PHY_ADDRESS, POLL>` | Yes | DP83848 identification, MII selection, negotiation and link monitoring |
 | `MdioController` | Yes | Clause 22 MDIO register reads and writes |
 | `Phy.Rtl8201Phy<PHY_ADDRESS, POLL>` | Yes | RTL8201F configuration and 100-full link monitoring |
 | `Phy.Rtl8211Phy<PHY_ADDRESS, POLL>` | Yes | RTL8211F configuration, restart and 100-full link monitoring |
@@ -134,6 +138,19 @@ See [usage and migration](docs/memory.md) and
 The former nongeneric `Ram.ReadByte/WriteByte` API and opaque `InternalRam*`
 primitives are removed; this is an explicit API/startup migration.
 
+### Ethernet
+
+Version 1.4.0 adds `MiiAdapter` and `Phy.Dp83848Phy` for 10/100 Mbit/s full-duplex
+Ethernet. Existing MAC engines retain their frame APIs; the media adapter owns
+nibble serialization and clock crossings. MII uses a 50 MHz MAC context and
+separate PHY clocks at 25 MHz or 2.5 MHz. The board provides clock/reset wiring,
+MDIO pads, and timing/CDC constraints.
+
+See [Ethernet contracts](docs/ethernet.md) and [MII integration](docs/mii.md)
+for construction, ownership, reset, and verification requirements. The new MII
+path passes focused simulation tests; board timing and hardware validation remain
+separate from those results.
+
 ### UART
 
 UART components derive bit timing from their component context. Every UART
@@ -179,7 +196,7 @@ compiler one common implementation contract. The wrappers delegate scheduled
 methods with `IBufferedUart by buffered`. Applications can hold an `IBufferedUart`
 reference when substitution is useful, or use a concrete component type directly.
 `Uart` remains available for custom unbuffered compositions. The shared FIFO
-dependency is declared in `livt.toml` as `Livt.Collections` version `1.1.0`.
+dependency is declared in `livt.toml` as `Livt.Collections` version `1.4.0`.
 
 - `TryTransmit(data) bool` reports FIFO acceptance, not wire completion.
 - `TryReceive(data: out byte) bool` atomically removes a byte. Failure assigns

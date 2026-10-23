@@ -1,0 +1,156 @@
+namespace Livt.IO
+
+/**
+ * Serializes a committed, complete frame in the PHY TX clock domain.
+ * The producer holds commit/drop stable until acknowledgement. A two-stage
+ * synchronizer receives commit; buffered FIFO tokens provide stable byte data.
+ * Full duplex only. TX_EN stays asserted across both nibbles of every byte.
+ */
+component MiiTransmitter
+{
+	// Wait for a synchronized complete-frame commit.
+	const PHASE_IDLE: logic[3] = 0
+
+	// Consume a byte and send its low nibble.
+	const PHASE_LOW: logic[3] = 1
+
+	// Send the held high nibble.
+	const PHASE_HIGH: logic[3] = 2
+
+	// Drain a rejected frame without transmission.
+	const PHASE_DISCARD: logic[3] = 3
+
+	// Release TX_EN and acknowledge the completed frame.
+	const PHASE_FINISH: logic[3] = 4
+
+	// Last-byte token marker.
+	const FRAME_END: logic[11] = 0x200
+
+	// 96 Ethernet bit times at four bits per MII clock.
+	const INTERFRAME_CLOCKS: logic[5] = 24
+
+	// PHY-facing outputs registered in the TX domain.
+	public txData: out logic[4]
+	public txEnable: out logic
+
+	// Borrowed complete-frame mailbox and FIFO response.
+	commit: bool
+	drop: bool
+	valid: bool
+	data: logic[11]
+
+	// Commit synchronizer; sample its old second stage before advancing it.
+	commitMeta: bool
+	commitSync: bool
+
+	// Serialization progress, held high nibble, and interframe gap.
+	phase: logic[3]
+	high: logic[4]
+	last: bool
+	failed: bool
+	gap: logic[5]
+
+	// FIFO admission and completion mailbox held until the next frame.
+	public ready: out bool
+	public acknowledged: out bool
+	public fault: out bool
+
+	/**
+	 * Borrows committed frame metadata and FIFO output in the transmit domain.
+	 */
+	new(domain: IContext, commit: bool, drop: bool,
+		valid: bool, data: logic[11])
+	{
+		this.context = domain
+		this.commit = commit
+		this.drop = drop
+		this.valid = valid
+		this.data = data
+	}
+
+	/**
+	 * Consumes one byte per two MII edges, or drains a rejected frame.
+	 */
+	process Ports[]()
+	{
+		this.ready = (phase == PHASE_LOW || phase == PHASE_DISCARD) && gap == 0
+	}
+
+	/**
+	 * Performs serialization, terminal acknowledgement, and a 96-bit wire gap.
+	 */
+	process Serialize()
+	{
+		state {
+			if (gap > 0) {
+				this.gap--
+			} else {
+				match (phase)
+				{
+					PHASE_IDLE =>
+					{
+						this.txEnable = 0b0
+
+						if (commitSync != acknowledged) {
+							this.failed = drop
+							this.phase = PHASE_LOW
+
+							if (drop) {
+								this.phase = PHASE_DISCARD
+							}
+						}
+					}
+
+					PHASE_LOW =>
+					{
+						if (valid) {
+							this.txData = data as logic[4]
+							this.txEnable = 0b1
+							this.high = (data >> 4) as logic[4]
+							this.last = (data & FRAME_END) != 0
+							this.phase = PHASE_HIGH
+						} else {
+							this.txEnable = 0b0
+							this.failed = true
+							this.phase = PHASE_DISCARD
+						}
+					}
+
+					PHASE_HIGH =>
+					{
+						this.txData = high
+						this.phase = PHASE_LOW
+
+						if (last) {
+							this.phase = PHASE_FINISH
+						}
+					}
+
+					PHASE_FINISH =>
+					{
+						this.txEnable = 0b0
+						this.acknowledged = commitSync
+						this.fault = failed
+						this.gap = INTERFRAME_CLOCKS
+						this.phase = PHASE_IDLE
+					}
+
+					_ =>
+					{
+						if (valid) {
+							this.txEnable = 0b0
+
+							if ((data & FRAME_END) != 0) {
+								this.phase = PHASE_FINISH
+							}
+						}
+					}
+				}
+			}
+
+			var previous = commitMeta
+			this.commitMeta = commit
+			this.commitSync = previous
+		}
+	}
+}

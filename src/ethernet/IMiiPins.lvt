@@ -1,0 +1,18 @@
+namespace Livt.IO
+
+/**
+ * Full-duplex MII pins. RX inputs belong to receiveContext; TX outputs belong
+ * to transmitContext. The board supplies PHY-derived clocks and coordinated
+ * asynchronous reset assertion, with synchronous release in each domain.
+ */
+public interface IMiiPins
+{
+	// PHY-to-MAC signals sampled in the receive context.
+	rxData: in logic[4]
+	rxValid: in logic
+	rxError: in logic
+
+	// MAC-to-PHY signals driven in the transmit context.
+	txData: out logic[4]
+	txEnable: out logic
+}

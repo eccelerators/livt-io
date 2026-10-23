@@ -1,5 +1,11 @@
 # Livt.IO Usage
 
+## Ethernet MII
+
+Livt.IO 1.4.0 adds `MiiAdapter` and `Phy.Dp83848Phy`. See the
+[MII construction and clock/reset contract](mii.md) for a wiring fragment and
+[Ethernet contracts](ethernet.md) for the shared MAC APIs.
+
 ## RAM
 
 ```livt

@@ -1,0 +1,104 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Owns a fresh simulation fixture; its single test exercises reset startup and frame behavior.
+ */
+@Test
+@Context(ClockFrequency = 25MHz, ResetStyle = ResetStyle.Asynchronous)
+component MiiReceiverTest
+{
+	// Owned receive engine and deterministic PHY traffic stimulus.
+	receiver: MiiReceiver
+	run: bool
+	position: uint
+	frame: uint
+	ready: bool
+	valid: logic
+	error: logic
+
+	// Accepted terminators and bytes from the first undamaged frame.
+	ends: uint
+	badEnds: uint
+	goodBytes: uint
+
+	/**
+	 * Constructs the test-owned devices and binds their clock and signal dependencies.
+	 */
+	new()
+	{
+		this.receiver = new MiiReceiver(this.context, 0b0101, valid, error, ready)
+	}
+
+	/**
+	 * Drives the deterministic test traffic without adding a sampling stage.
+	 */
+	process Drive[]()
+	{
+		var length = 8
+
+		if (frame == 1) {
+			length = 7
+		}
+
+		this.valid = 0b0
+		this.error = 0b0
+		this.ready = !(frame == 3 && position == 3)
+
+		if (run && frame < 4 && position < length as uint) {
+			this.valid = 0b1
+		}
+
+		if (frame == 2 && position == 3) {
+			this.error = 0b1
+		}
+	}
+
+	/**
+	 * Advances test frame timing and checks accepted receive tokens.
+	 */
+	process Advance()
+	{
+		state {
+			if (run && frame < 4) {
+				if (position == 15) {
+					this.position = 0
+					this.frame++
+				} else {
+				this.position++
+				}
+			}
+
+			if (receiver.valid && ready) {
+				if ((receiver.data & 0x200) != 0) {
+					this.ends++
+
+					if ((receiver.data & 0x400) != 0) {
+						this.badEnds++
+					}
+				} elif (frame == 0) {
+					assert (receiver.data & 0xFF) == 0x55
+					this.goodBytes++
+				}
+			}
+		}
+	}
+
+	/**
+	 * Exercises this scenario once from the fixture reset state and checks completion and ownership.
+	 */
+	@Test
+	fn TerminatesOddErrorAndOverflowFrames()
+	{
+		this.run = true
+
+		for (var tick = 0; tick < 300; tick++) {
+			state {}
+		}
+
+		assert ends == 4
+		assert badEnds == 3
+		assert goodBytes == 4
+	}
+}

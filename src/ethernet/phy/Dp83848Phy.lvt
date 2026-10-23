@@ -1,0 +1,270 @@
+namespace Livt.IO.Phy
+
+using Livt.IO
+
+/**
+ * DP83848 Clause-22 management for MII, advertising 10/100 full duplex only.
+ * Owns the borrowed MDIO controller exclusively. Board supplies the 25 MHz
+ * reference, hardware reset, and startupReady. Restart is a toggle. Errors
+ * revoke readiness and retry after POLL; half duplex is never admitted.
+ */
+component Dp83848Phy<PHY_ADDRESS: int = 1, POLL: Time = 10ms> : IEthernetLinkStatus
+{
+	static assert PHY_ADDRESS >= 0 && PHY_ADDRESS <= 31, "Clause-22 address required"
+	static assert POLL >= 1us, "Positive polling interval required"
+
+	// Basic control register.
+	const BMCR: byte = 0
+
+	// Basic status register; read twice for latched-low link status.
+	const BMSR: byte = 1
+
+	// First PHY identification register.
+	const PHY_ID1: byte = 2
+
+	// Second PHY identification register.
+	const PHY_ID2: byte = 3
+
+	// Autonegotiation advertisement register.
+	const ANAR: byte = 4
+
+	// Resolved physical link status register.
+	const PHYSTS: byte = 16
+
+	// RMII/bypass configuration register.
+	const RBR: byte = 23
+
+	// DP83848 manufacturer identification.
+	const EXPECTED_ID1: logic[16] = 0x2000
+
+	// DP83848 model identification without revision bits.
+	const EXPECTED_ID2: logic[16] = 0x5C90
+
+	// Ignore PHY revision when comparing model identity.
+	const MODEL_MASK: logic[16] = 0xFFF0
+
+	// Basic-control software reset bit.
+	const SOFTWARE_RESET: logic[16] = 0x8000
+
+	// Clear RMII mode while preserving unrelated configuration.
+	const MII_MODE_MASK: logic[16] = 0xFFDF
+
+	// Advertise IEEE selector plus 10-full and 100-full.
+	const FULL_DUPLEX_ADVERTISEMENT: logic[16] = 0x0141
+
+	// Enable and restart autonegotiation.
+	const RESTART_AUTONEGOTIATION: logic[16] = 0x1200
+
+	// Basic status requires link up and autonegotiation complete.
+	const LINK_NEGOTIATED: logic[16] = 0x0024
+
+	// Check link, duplex, loopback, and negotiation status.
+	const PHYSICAL_STATUS_MASK: logic[16] = 0x001D
+
+	// Require link, full duplex, negotiation complete, and no loopback.
+	const PHYSICAL_READY: logic[16] = 0x0015
+
+	// Resolved speed bit: set for 10 Mb/s.
+	const SPEED_10: logic[16] = 2
+
+	// Bound software-reset register polling.
+	const RESET_POLL_LIMIT: uint = 10000
+
+	// Borrowed exclusive management bus and board startup/restart controls.
+	mdio: IMdioController
+	startupReady: bool
+	restart: bool
+
+	// Negotiation state and last observed restart request.
+	seenRestart: bool
+	linked: bool
+	rate: EthernetSpeed
+
+	// Construction-time polling interval in the inherited context.
+	POLL_TICKS: uint
+
+	// Published management diagnostics; stage 5 denotes a resolved link.
+	public failed: out bool
+	public stage: out byte
+	public identifier1: out logic[16]
+	public identifier2: out logic[16]
+	public bmsr: out logic[16]
+	public physicalStatus: out logic[16]
+
+	/**
+	 * Binds the management bus and board startup/restart controls.
+	 */
+	new(mdio: IMdioController, startupReady: bool, restart: bool)
+	{
+		this.mdio = mdio
+		this.startupReady = startupReady
+		this.restart = restart
+		POLL_TICKS = this.context.TicksFor(POLL)
+	}
+
+	/**
+	 * Exposes only a resolved, full-duplex link after board startup.
+	 */
+	process Status[]()
+	{
+		this.ready = linked && startupReady && restart == seenRestart
+		this.speed = EthernetSpeed.Unknown
+
+		if (this.ready) {
+			this.speed = rate
+		}
+	}
+
+	/**
+	 * Identifies the PHY, selects MII, and monitors negotiated speed and duplex.
+	 * Explicit states retain the sampling and MDIO transaction sequence.
+	 */
+	process Manage()
+	{
+		var value: logic[16] = 0
+		var status: logic[16] = 0
+		var physical: logic[16] = 0
+		var ticks: uint = 0
+		var attempts: uint = 0
+		var nextRate = EthernetSpeed.Unknown
+
+		state Initialize {
+			this.linked = false
+			this.failed = false
+			this.seenRestart = restart
+			this.stage = 1
+
+			if (!startupReady) {
+				goto Initialize
+			}
+		}
+
+		if (mdio.Read(PHY_ADDRESS as byte, PHY_ID1, value) != EthernetResult.Success) {
+			goto Failed
+		}
+
+		this.identifier1 = value
+
+		if (value != EXPECTED_ID1) {
+			goto Failed
+		}
+
+		if (mdio.Read(PHY_ADDRESS as byte, PHY_ID2, value) != EthernetResult.Success) {
+			goto Failed
+		}
+
+		this.identifier2 = value
+
+		if ((value & MODEL_MASK) != EXPECTED_ID2) {
+			goto Failed
+		}
+
+		this.stage = 2
+
+		if (mdio.Write(PHY_ADDRESS as byte, BMCR, SOFTWARE_RESET) != EthernetResult.Success) {
+			goto Failed
+		}
+
+		attempts = 0
+
+		state ResetWait {}
+
+		if (mdio.Read(PHY_ADDRESS as byte, BMCR, value) != EthernetResult.Success) {
+			goto Failed
+		}
+
+		if ((value & SOFTWARE_RESET) != 0) {
+			attempts++
+
+			if (attempts >= RESET_POLL_LIMIT) {
+				goto Failed
+			}
+
+			goto ResetWait
+		}
+
+		if (mdio.Read(PHY_ADDRESS as byte, RBR, value) != EthernetResult.Success) {
+			goto Failed
+		}
+
+		// Clear RMII_MODE; preserve all other fields.
+		if (mdio.Write(PHY_ADDRESS as byte, RBR, value & MII_MODE_MASK) != EthernetResult.Success) {
+			goto Failed
+		}
+
+		if (mdio.Write(PHY_ADDRESS as byte, ANAR, FULL_DUPLEX_ADVERTISEMENT) != EthernetResult.Success
+			|| mdio.Write(PHY_ADDRESS as byte, BMCR, RESTART_AUTONEGOTIATION) != EthernetResult.Success) {
+			goto Failed
+		}
+
+		this.stage = 4
+
+		state Poll {}
+
+		if (!startupReady || restart != seenRestart) {
+			goto Initialize
+		}
+
+		if (mdio.Read(PHY_ADDRESS as byte, BMSR, status) != EthernetResult.Success
+			|| mdio.Read(PHY_ADDRESS as byte, BMSR, status) != EthernetResult.Success
+			|| mdio.Read(PHY_ADDRESS as byte, PHYSTS, physical) != EthernetResult.Success) {
+			goto Failed
+		}
+
+		this.bmsr = status
+		this.physicalStatus = physical
+		nextRate = EthernetSpeed.Mbps100
+
+		if ((physical & SPEED_10) != 0) {
+			nextRate = EthernetSpeed.Mbps10
+		}
+
+		// A speed transition revokes readiness for at least one edge.
+		if (rate != nextRate) {
+			this.linked = false
+		}
+
+		state {}
+
+		this.rate = nextRate
+		this.linked = (status & LINK_NEGOTIATED) == LINK_NEGOTIATED && (physical & PHYSICAL_STATUS_MASK) == PHYSICAL_READY
+		this.stage = 4
+
+		if (linked) {
+			this.stage = 5
+		}
+
+		ticks = 0
+
+		state Wait {}
+
+		if (!startupReady || restart != seenRestart) {
+			goto Initialize
+		}
+
+		ticks++
+
+		if (ticks < POLL_TICKS) {
+			goto Wait
+		}
+
+		goto Poll
+
+		state Failed {
+			this.failed = true
+			this.linked = false
+			this.stage = 6
+			ticks = 0
+		}
+
+		state Retry {}
+
+		ticks++
+
+		if (ticks < POLL_TICKS && restart == seenRestart) {
+			goto Retry
+		}
+
+		goto Initialize
+	}
+}

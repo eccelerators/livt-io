@@ -1,0 +1,24 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Resolved test link; the fixture selects 10 or 100 Mb/s.
+ */
+component MiiTestLink : IEthernetLinkStatus
+{
+	// Test-selected link rate; readiness stays asserted.
+	public ten: bool
+	/**
+	 * Publishes the resolved full-duplex test link.
+	 */
+	process Status[]()
+	{
+		this.ready = true
+		this.speed = EthernetSpeed.Mbps100
+
+		if (ten) {
+			this.speed = EthernetSpeed.Mbps10
+		}
+	}
+}

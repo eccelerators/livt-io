@@ -1,0 +1,65 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Deterministic MDIO register model with injected identity and transport failures.
+ */
+component Dp83848Registers : IMdioController
+{
+	// Modeled PHY registers, initial negotiated link, and fault injection controls.
+	public status: logic[16] = 0x0015
+	public advertisement: logic[16]
+	public mode: logic[16] = 0x0020
+	public wrongId: bool
+	public fail: bool
+
+	/**
+	 * Returns modeled Clause-22 register contents; an injected failure returns Invalid.
+	 */
+	override fn Read(phy: byte, register: byte, value: out logic[16]) EthernetResult
+	{
+		assert phy == 1
+		value = 0
+
+		if (fail) {
+			return EthernetResult.Invalid
+		}
+
+		if (register == 2 && !wrongId) {
+			value = 0x2000
+		} elif (register == 3) {
+			value = 0x5C90
+		} elif (register == 1 && (status & 1) != 0) {
+			value = 0x0024
+		} elif (register == 16) {
+			value = status
+		} elif (register == 23) {
+			value = mode
+		}
+
+		return EthernetResult.Success
+	}
+
+	/**
+	 * Records supported PHY configuration writes; an injected failure leaves registers unchanged.
+	 */
+	override fn Write(phy: byte, register: byte, value: logic[16]) EthernetResult
+	{
+		assert phy == 1
+
+		if (fail) {
+			return EthernetResult.Invalid
+		}
+
+		if (register == 4) {
+			this.advertisement = value
+		}
+
+		if (register == 23) {
+			this.mode = value
+		}
+
+		return EthernetResult.Success
+	}
+}

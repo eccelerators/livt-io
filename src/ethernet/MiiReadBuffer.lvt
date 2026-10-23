@@ -1,0 +1,84 @@
+namespace Livt.IO
+
+/**
+ * Reserves response space before popping; holds the output stable under backpressure.
+ */
+component MiiReadBuffer
+{
+	// Borrowed read-domain inputs; active remains low until both FIFO domains finish clearing.
+	active: bool
+	responseValid: bool
+	response: logic[11]
+	ready: bool
+
+	// Two register slots cover a stalled output and the FIFO's registered response.
+	first: logic[11]
+	second: logic[11]
+	count: logic[2]
+
+	// FIFO requests and consumer-facing ready/valid output.
+	public pop: out bool
+	public valid: out bool
+	public data: out logic[11]
+
+	/**
+	 * Borrows the FIFO response and consumer readiness in the supplied read-clock context.
+	 */
+	new(domain: IContext, active: bool, responseValid: bool, response: logic[11], ready: bool)
+	{
+		this.context = domain
+		this.active = active
+		this.responseValid = responseValid
+		this.response = response
+		this.ready = ready
+	}
+
+	/**
+	 * Reserves space for an arriving FIFO response before issuing another pop; output remains stable while stalled.
+	 */
+	process Ports[]()
+	{
+		this.valid = active && count != 0 && context.rst == 0b0
+		this.data = first
+		var reserved = (count as uint) as int
+
+		if (responseValid) {
+			reserved++
+		}
+
+		if (this.valid && ready) {
+			reserved--
+		}
+
+		this.pop = active && reserved < 2 && context.rst == 0b0
+	}
+
+	/**
+	 * Consumes the old output before appending a FIFO response on the same edge; inactive startup clears occupancy.
+	 */
+	process Buffer()
+	{
+		state {
+			if (!active) {
+				this.count = 0
+			} else {
+				if (this.valid && ready) {
+					this.first = second
+					this.count--
+				}
+
+				if (responseValid) {
+					assert this.count < 2
+
+					if (this.count == 0) {
+						this.first = response
+					} else {
+						this.second = response
+					}
+
+					this.count++
+				}
+			}
+		}
+	}
+}

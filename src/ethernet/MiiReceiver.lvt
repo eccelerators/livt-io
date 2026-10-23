@@ -1,0 +1,113 @@
+namespace Livt.IO
+
+/**
+ * Captures low-nibble-first MII bytes in the PHY receive clock domain.
+ * Tokens contain data[7:0], start[8], end[9], error[10]. End is a separate
+ * token. Overflow discards the rest of the frame and eventually emits an error
+ * terminator; a partial frame can never silently join the following frame.
+ */
+component MiiReceiver
+{
+	// First-byte token marker.
+	const FRAME_START: logic[11] = 0x100
+
+	// Separate frame-termination token marker.
+	const FRAME_END: logic[11] = 0x200
+
+	// Damaged-frame token marker.
+	const FRAME_ERROR: logic[11] = 0x400
+
+	// Borrowed PHY data/control and FIFO admission in the RX clock domain.
+	rxData: logic[4]
+	rxValid: logic
+	rxError: logic
+	ready: bool
+
+	// Partial-byte assembly and sticky frame/error tracking.
+	low: logic[4]
+	half: bool
+	active: bool
+	first: bool = true
+	bad: bool
+	ending: bool
+
+	// Token publication; a pending terminator remains valid until accepted.
+	public valid: out bool
+	public data: out logic[11]
+
+	/**
+	 * Borrows physical RX pins and FIFO admission in the receive domain.
+	 */
+	new(domain: IContext, rxData: logic[4], rxValid: logic, rxError: logic, ready: bool)
+	{
+		this.context = domain
+		this.rxData = rxData
+		this.rxValid = rxValid
+		this.rxError = rxError
+		this.ready = ready
+	}
+
+	/**
+	 * Publishes a byte on the high nibble edge, or a pending frame terminator.
+	 */
+	process Ports[]()
+	{
+		this.valid = ending || (rxValid == 0b1 && half && !bad)
+		var token = ((rxData as logic[11]) << 4) | (low as logic[11])
+
+		if (first) {
+			token = token | FRAME_START
+		}
+
+		if (ending) {
+			token = FRAME_END
+		}
+
+		if (bad || rxError == 0b1) {
+			token = token | FRAME_ERROR
+		}
+
+		this.data = token
+	}
+
+	/**
+	 * Tracks framing and never resumes capture in the middle of a lost frame.
+	 */
+	process Capture()
+	{
+		state {
+			if (ending) {
+				if (ready) {
+					this.ending = false
+					this.active = false
+					this.first = true
+					this.half = false
+					this.bad = rxValid == 0b1
+				}
+			} elif (rxValid == 0b1) {
+				this.active = true
+
+				if (rxError == 0b1) {
+					this.bad = true
+				}
+
+				if (half) {
+					if (!ready) {
+						this.bad = true
+					}
+
+					this.first = false
+				} else {
+					this.low = rxData
+				}
+
+				this.half = !half
+			} elif (active) {
+				this.bad = bad || half
+				this.ending = true
+			} else {
+				this.bad = false
+			}
+		}
+	}
+}

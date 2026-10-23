@@ -1,0 +1,75 @@
+namespace Livt.IO
+
+using Livt.Collections
+
+/**
+ * Complete Ethernet tokens cross from producer to consumer clock without interpretation.
+ * Board asserts both resets together and releases each synchronously to its clock.
+ * Asynchronous assertion clears stale handshakes even while a media clock is stopped.
+ */
+@Context(ResetStyle = ResetStyle.Asynchronous)
+component MiiClockBridge<CAPACITY: int>
+{
+	static assert CAPACITY >= 2 && (CAPACITY & (CAPACITY - 1)) == 0, "FIFO capacity must be a power of two, at least two"
+
+	// Borrowed consumer-clock context; reset assertion is asynchronous.
+	@Context(ResetStyle = ResetStyle.Asynchronous)
+	readContext: IContext
+
+	// Producer-domain producer handshake; tokens are accepted only while writeReady.
+	writeValid: bool
+	writeData: logic[11]
+	public writeReady: out bool
+
+	// Consumer-domain consumer handshake; data stays stable under backpressure.
+	readReady: bool
+	public readValid: out bool
+	public readData: out logic[11]
+
+	// Payload storage requests block RAM; mapping must be checked in the target synthesis report.
+	tokens: AsyncFifo<logic[11], CAPACITY, MiiFifoStorage<logic[11], CAPACITY>>
+
+	// Owned startup endpoints and registered-response buffer.
+	writeStartup: MiiClearEndpoint
+	readStartup: MiiClearEndpoint
+	output: MiiReadBuffer
+
+	// Combinational FIFO request aliases; no extra sampling stage.
+	readActive: bool
+	readClear: bool
+	push: bool
+
+	/**
+	 * Owns the FIFO, startup endpoints and response buffer; borrows the consumer read context.
+	 * Write-side components use the producer context and read-side components use readDomain.
+	 */
+	new(writeDomain: IContext, readDomain: IContext, writeValid: bool,
+		writeData: logic[11], readReady: bool)
+	{
+		this.writeValid = writeValid
+		this.writeData = writeData
+		this.readReady = readReady
+		this.context = writeDomain
+		this.readContext = readDomain
+		this.writeStartup = new MiiClearEndpoint(this.context, tokens.readCleared)
+		this.readStartup = new MiiClearEndpoint(readContext, tokens.writeCleared)
+		this.output = new MiiReadBuffer(readContext, readActive,
+			tokens.popValid, tokens.popData, readReady)
+		this.tokens = new AsyncFifo<logic[11], CAPACITY, MiiFifoStorage<logic[11], CAPACITY>>(
+			this.context, readContext, writeStartup.clear, readClear,
+			push, writeData, output.pop)
+	}
+
+	/**
+	 * Exposes FIFO acceptance and buffered output without inserting an additional clock boundary.
+	 */
+	process Ports[]()
+	{
+		this.readActive = readStartup.active
+		this.readClear = readStartup.clear
+		this.push = writeValid && writeStartup.active
+		this.writeReady = writeStartup.active && !tokens.full && context.rst == 0b0
+		this.readValid = output.valid
+		this.readData = output.data
+	}
+}

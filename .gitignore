@@ -2,5 +2,5 @@ out/
 .livt/
 __pycache__/
 *.pyc
-verification/uart-timing/results/
-
+verification/
+.vscode/

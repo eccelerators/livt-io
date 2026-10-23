@@ -1,15 +1,19 @@
 # Ethernet contracts
 
 Livt.IO provides buffered Ethernet receive/transmit engines, a media interface,
-an RMII adapter, MDIO transport and PHY management components. This document
+RMII and MII adapters, MDIO transport and PHY management components. This document
 describes their configuration, ownership rules and integration requirements.
 
 ## Scope and layering
 
-The RMII implementation provides full-duplex 100 Mbit/s RMII using one
-50 MHz clock/reset context. The contracts represent 10 Mbit/s as well, but that
-rate must not be advertised until separately implemented and qualified. MII,
-half-duplex, VLAN-tagged frames, jumbo frames and pause-frame flow control are
+`RmiiAdapter<ENABLE_10>` uses one 50 MHz clock/reset context. Its default mode
+is 100 Mbit/s; `ENABLE_10 = true` also admits 10 Mbit/s with a compatible link
+manager. Both RMII rates have been exercised on hardware in consumer designs.
+
+Livt.IO 1.4.0 adds [MII and DP83848 support](mii.md), with independent RX/TX
+clocks and focused simulation coverage at both 10 and 100 Mbit/s. This does not
+transfer the RMII hardware results to the new MII implementation.
+Half-duplex, VLAN-tagged frames, jumbo frames and pause-frame flow control are
 not supported. Ethernet transport does not imply an IP,
 UDP or TCP stack.
 
@@ -21,6 +25,7 @@ Public declarations live in `Livt.IO`, under `src/ethernet`:
 | `IEthernetTransmitter` | Scheduled TX fill/commit and local completion API |
 | `IEthernetMedia` | Replaceable RMII/MII adapter, raw octets and wire boundaries |
 | `IRmiiPins` | Physical RMII signals viewed from the FPGA adapter |
+| `IMiiPins` | MII data/control signals; RX/TX contexts are supplied separately |
 | `IMdioPins` | Split input/output/output-enable management pins |
 | `IEthernetLinkStatus` | PHY manager's coherent ready/rate outputs |
 | `EthernetResult` | Immediate application-operation result |
@@ -331,7 +336,10 @@ increment saturating counters with the documented precedence. No invalid or
 partially received frame becomes readable. Reset invalidates metadata rather
 than clearing cells, so stale bytes remain inaccessible.
 
-The PHY managers advertise only 100 Mbit/s full duplex. `ENABLE_10` is an
-experimental RMII adapter option, not a supported end-to-end 10 Mbit/s mode.
-Half-duplex collision handling, asynchronous clock-domain FIFOs and pad wrappers
-are not supplied by these components.
+`Rtl8201Phy` and `Rtl8211Phy` select 100 Mbit/s full duplex. `Dp83848Phy`
+advertises both 10 and 100 Mbit/s full duplex for MII. Enabling 10 Mbit/s in the
+RMII adapter also requires a link manager that admits that rate.
+
+`MiiAdapter` supplies asynchronous FIFOs; RMII stays in one clock domain.
+Physical pad wrappers, board timing constraints, and clock/reset distribution
+remain board responsibilities. Half-duplex collision handling is not provided.

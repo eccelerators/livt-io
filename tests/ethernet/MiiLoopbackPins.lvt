@@ -1,0 +1,10 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Direct wire loopback; both MII directions use the same test media clock.
+ */
+component MiiLoopbackPins : IMiiPins
+{
+}

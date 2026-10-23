@@ -1,0 +1,134 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Owns a fresh simulation fixture; its single test exercises reset startup and frame behavior.
+ */
+@Test
+@Context(ClockFrequency = 50MHz, ResetStyle = ResetStyle.Asynchronous)
+component Mii100Test
+{
+	// Owned media fixture with a shared RX/TX test clock.
+	@Context(ClockFrequency = 25MHz, ResetStyle = ResetStyle.Asynchronous)
+	mediaClock: IContext
+	pins: MiiLoopbackPins
+	link: MiiTestLink
+	adapter: MiiAdapter
+
+	// Accepted bytes and terminal events observed in the MAC domain.
+	received: uint
+	frames: uint
+	errors: uint
+	completions: uint
+	faults: uint
+
+	// Source enable and count of bytes accepted by the adapter.
+	run: bool
+	sent: uint
+
+	/**
+	 * Constructs the test-owned devices and binds their clock and signal dependencies.
+	 */
+	new()
+	{
+		this.pins = new MiiLoopbackPins()
+		this.link = new MiiTestLink()
+		this.adapter = new MiiAdapter(this.context, mediaClock, mediaClock, pins, link)
+	}
+
+	/**
+	 * Connects TX pins to RX pins in the shared test media domain.
+	 */
+	process Loop[]()
+	{
+		this.pins.rxData = pins.txData
+		this.pins.rxValid = pins.txEnable
+		this.pins.rxError = 0b0
+	}
+
+	/**
+	 * Checks accepted RX bytes and counts frame/terminal events.
+	 */
+	process Observe()
+	{
+		state {
+			if (adapter.rxValid) {
+				assert adapter.rxData == (received & 0xFF) as byte
+				this.received++
+			}
+
+			if (adapter.rxEnd) {
+				this.frames++
+			}
+
+			if (adapter.rxError) {
+				this.errors++
+			}
+
+			if (adapter.txDone) {
+				this.completions++
+			}
+
+			if (adapter.txFault) {
+				this.faults++
+			}
+		}
+	}
+
+	/**
+	 * Drives the deterministic test traffic without adding a sampling stage.
+	 */
+	process Drive[]()
+	{
+		this.adapter.txData = sent as byte
+		this.adapter.txFirst = (sent & 63) == 0
+		this.adapter.txLast = (sent & 63) == 63
+		this.adapter.txValid = run && sent < 128
+	}
+
+	/**
+	 * Advances the source only when the media adapter accepts a byte.
+	 */
+	process Send()
+	{
+		state {
+			if (run && sent < 128 && adapter.txReady) {
+				this.sent++
+			}
+		}
+	}
+
+	/**
+	 * Exercises this scenario once from the fixture reset state and checks completion and ownership.
+	 */
+	@Test
+	fn PreservesBytesAcrossClocksAndRepeatedFrames()
+	{
+		this.link.ten = false
+
+		for (var settle = 0; settle < 300; settle++) {
+			state {}
+		}
+
+		this.run = true
+		var wait = 0
+
+		while (completions < 2 && wait < 10000) {
+			state {
+				wait++
+			}
+		}
+
+		assert completions == 2
+
+		for (var settle = 0; settle < 100; settle++) {
+			state {}
+		}
+
+		assert received == 128
+		assert frames == 2
+		assert errors == 0
+		assert faults == 0
+	}
+}

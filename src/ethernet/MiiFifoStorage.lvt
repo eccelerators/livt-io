@@ -1,0 +1,46 @@
+namespace Livt.IO
+
+using Livt.Collections
+
+/**
+ * FIFO payload store with explicit combinational command wiring into its write process.
+ * This avoids a generated input-accessor register delaying RAM writes behind pointers.
+ * One clocked writer and a read tap registered by AsyncFifo's read-domain endpoint.
+ */
+component MiiFifoStorage<T, CAPACITY: int> : IFifoStorage<T, FifoStorageGeometry<CAPACITY>>
+{
+	static assert CAPACITY > 0, "FIFO payload capacity must be positive"
+
+	// Reset-free block memory; unread/unpublished cells have unspecified contents.
+	@Memory(Style = MemoryStyle.Block)
+	@UninitializedStorage
+	cells: T[CAPACITY]
+
+	// Combinational command aliases keep payload writes aligned with FIFO pointer publication.
+	write: bool
+	address: uint
+	data: T
+
+	/**
+	 * Aliases write commands combinationally and exposes the addressed read cell; no extra request register is permitted.
+	 */
+	process Ports[]()
+	{
+		this.write = this.writeEnable
+		this.address = this.writeAddress
+		this.data = this.writeData
+		this.readData = cells[this.readAddress]
+	}
+
+	/**
+	 * Commits an accepted write on the owning clock edge; reset gates writes without clearing payload RAM.
+	 */
+	process Store()
+	{
+		state {
+			if (write && context.rst == 0b0) {
+				this.cells[address] = data
+			}
+		}
+	}
+}
