@@ -9,16 +9,17 @@ component MiiTestLink : IEthernetLinkStatus
 {
 	// Test-selected link rate; readiness stays asserted.
 	public ten: bool
+	public disabled: in bool
 	/**
 	 * Publishes the resolved full-duplex test link.
 	 */
 	process Status[]()
 	{
-		this.ready = true
-		this.speed = EthernetSpeed.Mbps100
+		ready = !disabled
+		speed = EthernetSpeed.Mbps100
 
 		if (ten) {
-			this.speed = EthernetSpeed.Mbps10
+			speed = EthernetSpeed.Mbps10
 		}
 	}
 }

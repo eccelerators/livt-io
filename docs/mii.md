@@ -46,8 +46,10 @@ serialization. Admission is paced at one byte per four MAC cycles to preserve
 the existing MAC synchronous-RAM read contract. `txReady` describes buffer admission; `txDone` arrives only after
 physical TX completion. The serializer maintains a 96-bit interframe gap at
 both speeds. An aborted partial frame is drained without transmission. Link
-loss or producer abort after commit marks the transaction failed even if the
-serializer finishes draining the frame. Reset is required to recover if a PHY
+loss or producer abort after commit sets a MAC-local failure flag. The committed
+discard decision remains frozen until acknowledgement, so the serializer can
+finish the frame without sampling changing metadata. Completion reports failure
+for that transaction; the next frame starts with cleared local failure state. Reset is required to recover if a PHY
 clock permanently stops before acknowledging completion.
 
 RX cannot backpressure the PHY. Odd nibble counts, RX_ER, or FIFO overflow mark
@@ -70,3 +72,9 @@ These tests are behavioral verification, not board timing qualification.
 The MII fixtures are ordinary files in `tests/ethernet`, listed in `livt.toml`.
 Run one case with `livt test -R -r Mii100Test` or
 `livt test -R -r Dp83848PhyTest`.
+
+Commit/drop and acknowledgement/fault are held-data mailboxes. Bound the discard
+path to the transmitter to 20 ns (less than one 40 ns TX period) and the return
+fault path to MAC completion to 20 ns. Their controls pass through two-stage
+synchronizers before payload consumption. Keep these bounded data paths distinct
+from first-stage synchronizer exceptions; do not blanket-false-path payloads.

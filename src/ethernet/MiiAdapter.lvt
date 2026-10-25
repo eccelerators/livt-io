@@ -7,6 +7,8 @@ namespace Livt.IO
  * before commit; completion means TX_EN has fallen, not merely FIFO admission.
  * All three resets must assert together, asynchronously, and release locally.
  * Board constraints must cover FIFO Gray buses and mailbox synchronizers.
+ * Committed discard metadata remains immutable until acknowledgement; a late
+ * abort changes only the MAC-domain completion result.
  */
 @Context(ClockFrequency = 50MHz, ResetStyle = ResetStyle.Asynchronous)
 component MiiAdapter : IEthernetMedia
@@ -47,6 +49,9 @@ component MiiAdapter : IEthernetMedia
 	busy: bool
 	count: logic[11]
 
+	// MAC-domain failure after commit; never sampled by the PHY domain.
+	lateAbort: bool
+
 	// Four application cycles preserve the existing MAC synchronous-RAM byte cadence.
 	byteSlot: logic[2]
 
@@ -74,15 +79,15 @@ component MiiAdapter : IEthernetMedia
 	new(macContext: IContext, receiveContext: IContext, transmitContext: IContext,
 		pins: IMiiPins, link: IEthernetLinkStatus)
 	{
-		this.context = macContext
-		this.receiveDomain = receiveContext
-		this.transmitDomain = transmitContext
+		context = macContext
+		receiveDomain = receiveContext
+		transmitDomain = transmitContext
 		this.pins = pins
 		this.link = link
-		this.rxQueue = new MiiClockBridge<2048>(receiveDomain, this.context, receive.valid, receive.data, true)
-		this.txQueue = new MiiClockBridge<2048>(this.context, transmitDomain, push, token, transmit.ready)
-		this.receive = new MiiReceiver(receiveDomain, pins.rxData, pins.rxValid, pins.rxError, rxQueue.writeReady)
-		this.transmit = new MiiTransmitter(transmitDomain, commit, discard,
+		rxQueue = new MiiClockBridge<2048>(receiveDomain, context, receive.valid, receive.data, true)
+		txQueue = new MiiClockBridge<2048>(context, transmitDomain, push, token, transmit.ready)
+		receive = new MiiReceiver(receiveDomain, pins.rxData, pins.rxValid, pins.rxError, rxQueue.writeReady)
+		transmit = new MiiTransmitter(transmitDomain, commit, discard,
 			txQueue.readValid, txQueue.readData)
 	}
 
@@ -91,33 +96,33 @@ component MiiAdapter : IEthernetMedia
 	 */
 	process Ports[]()
 	{
-		this.pins.txData = transmit.txData
-		this.pins.txEnable = transmit.txEnable
-		this.inputData = this.txData
-		this.inputValid = this.txValid
-		this.inputFirst = this.txFirst
-		this.inputLast = this.txLast
-		this.inputAbort = this.txAbort
-		this.enabled = link.ready && (link.speed == EthernetSpeed.Mbps100
+		pins.txData = transmit.txData
+		pins.txEnable = transmit.txEnable
+		inputData = txData
+		inputValid = txValid
+		inputFirst = txFirst
+		inputLast = txLast
+		inputAbort = txAbort
+		enabled = link.ready && (link.speed == EthernetSpeed.Mbps100
 			|| link.speed == EthernetSpeed.Mbps10)
-		this.txReady = enabled && !busy && !inputAbort && txQueue.writeReady && byteSlot == 0
-		this.accept = enabled && !busy && !inputAbort && txQueue.writeReady && byteSlot == 0 && inputValid
-		this.abortFrame = !busy && count != 0 && (inputAbort || !enabled)
-		this.push = accept || (abortFrame && txQueue.writeReady)
+		txReady = enabled && !busy && !inputAbort && txQueue.writeReady && byteSlot == 0
+		accept = enabled && !busy && !inputAbort && txQueue.writeReady && byteSlot == 0 && inputValid
+		abortFrame = !busy && count != 0 && (inputAbort || !enabled)
+		push = accept || (abortFrame && txQueue.writeReady)
 		var nextToken = inputData as logic[11]
 
 		if (inputLast || abortFrame || count == LAST_BUFFER_INDEX) {
 			nextToken = nextToken | FRAME_END
 		}
 
-		this.token = nextToken
-		this.txDone = terminal && !terminalFault
-		this.txFault = terminal && terminalFault
-		this.rxData = rxQueue.readData as byte
-		this.rxValid = enabled && rxQueue.readValid && (rxQueue.readData & FRAME_END) == 0
-		this.rxStart = enabled && rxQueue.readValid && (rxQueue.readData & FRAME_START) != 0
-		this.rxEnd = rxQueue.readValid && (rxQueue.readData & FRAME_END) != 0
-		this.rxError = rxQueue.readValid && ((rxQueue.readData & FRAME_ERROR) != 0 || !enabled)
+		token = nextToken
+		txDone = terminal && !terminalFault
+		txFault = terminal && terminalFault
+		rxData = rxQueue.readData as byte
+		rxValid = enabled && rxQueue.readValid && (rxQueue.readData & FRAME_END) == 0
+		rxStart = enabled && rxQueue.readValid && (rxQueue.readData & FRAME_START) != 0
+		rxEnd = rxQueue.readValid && (rxQueue.readData & FRAME_END) != 0
+		rxError = rxQueue.readValid && ((rxQueue.readData & FRAME_ERROR) != 0 || !enabled)
 	}
 
 	/**
@@ -126,42 +131,44 @@ component MiiAdapter : IEthernetMedia
 	process Frames()
 	{
 		state {
-			this.byteSlot++
-			this.terminal = false
+			byteSlot++
+			terminal = false
 
 			if (busy) {
+				// Keep discard frozen while the PHY consumes the committed frame.
 				if (!enabled || inputAbort) {
-					this.discard = true
+					lateAbort = true
 				}
 
 				if (acknowledgeSync == commit) {
-					this.busy = false
-					this.count = 0
-					this.terminal = true
-					this.terminalFault = transmit.fault || discard
-					this.discard = false
+					busy = false
+					count = 0
+					terminal = true
+					terminalFault = transmit.fault || discard || lateAbort
+					discard = false
+					lateAbort = false
 				}
 			} elif (abortFrame && txQueue.writeReady) {
-				this.discard = true
-				this.commit = !commit
-				this.busy = true
+				discard = true
+				commit = !commit
+				busy = true
 			} elif (accept) {
 				if ((count == 0 && !inputFirst) || (count != 0 && inputFirst)) {
-					this.discard = true
+					discard = true
 				}
 
 				if (inputLast || count == LAST_BUFFER_INDEX) {
-					this.discard = discard || !inputLast
-					this.commit = !commit
-					this.busy = true
+					discard = discard || !inputLast
+					commit = !commit
+					busy = true
 				}
 
-				this.count++
+				count++
 			}
 
 			var previous = acknowledgeMeta
-			this.acknowledgeMeta = transmit.acknowledged
-			this.acknowledgeSync = previous
+			acknowledgeMeta = transmit.acknowledged
+			acknowledgeSync = previous
 		}
 	}
 }

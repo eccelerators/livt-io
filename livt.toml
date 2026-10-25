@@ -13,6 +13,8 @@ components = [
     "Mii10Test",
     "MiiReceiverTest",
     "MiiAbortTest",
+    "MiiLateAbortTest",
+    "MiiLateLinkLossTest",
     "EthernetCrcTest",
     "GenericRamTest",
     "RamBackendTest",

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Keep MII discard metadata stable until transmit acknowledgement. Late abort or
+  link loss now affects only the MAC-domain completion result, avoiding an unsafe
+  update across clock domains. Add late-abort/link-loss regression coverage and
+  document bounded mailbox payload timing.
+
 ## 1.4.0
 
 ### Added
