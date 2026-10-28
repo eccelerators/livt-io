@@ -4,6 +4,7 @@
 
 | API | Read timing | Use |
 |---|---|---|
+| `ArrayRam<T, CAPACITY = 64>` / `IRam<T>` | Scheduled, multi-cycle | Resettable logic-array storage |
 | `Ram<T, CAPACITY = 64, STYLE = Auto>` / `IRam<T>` | Scheduled, multi-cycle | Application transactions |
 | `BlockRam<T, CAPACITY = 2048>` | Same scheduled contract | Explicit block-style intent |
 | `DistributedRam<T, CAPACITY = 64>` | Same scheduled contract | Explicit distributed-style intent |
@@ -14,6 +15,8 @@
 The hierarchy keeps access timing independent of resource intent:
 
 ```text
+ArrayRam<T, CAPACITY> : IRam<T>
+
 Ram<T, CAPACITY, STYLE> : IRam<T>
 ├── BlockRam<T, CAPACITY>
 │   ├── Ram16
@@ -158,3 +161,16 @@ process MemoryPort[]()
 
 Dual clocks, true dual ports, byte masks, ECC and initialization files remain
 separate capabilities. Do not infer support for them from a storage-style hint.
+
+## Selecting an owned backend
+
+Components with a storage-type generic constrained by `IRam<T> & new()` can
+construct `ArrayRam`, `Ram`, `BlockRam` or `DistributedRam` without vendor-specific
+code. `ArrayRam` zeroes cells on reset and expresses ordinary logic-array storage;
+it has no uninitialized-storage or memory-style annotation. `Ram` preserves cells
+across reset and does not promise unwritten contents. Owners that require a common
+initial value must initialize their payload explicitly for every backend.
+
+`MemoryStyle.Auto` permits synthesis inference; it is not a register-only mode.
+`Block` and `Distributed` express synthesis preferences. Always inspect resource
+reports to confirm the chosen device's physical mapping.

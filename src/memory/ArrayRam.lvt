@@ -1,0 +1,53 @@
+namespace Livt.IO
+
+/**
+ * Scheduled RAM backed by a resettable logic array. Owns CAPACITY elements in
+ * the inherited context; one caller serializes access. Reset zeroes every cell.
+ * Use Ram for inferred, block or distributed storage without payload reset.
+ * Calls have no fixed-cycle guarantee. Synthesis may optimize unused cells.
+ */
+component ArrayRam<T, CAPACITY: int = 64> : IRam<T>
+{
+	static assert CAPACITY > 0, "Array capacity must be positive"
+
+	// Resettable payload; no memory-inference annotation or uninitialized storage.
+	storage: T[CAPACITY]
+
+	/**
+	 * Creates zero-initialized storage without external dependencies.
+	 */
+	new()
+	{
+	}
+
+	/**
+	 * Reads one cell, or the type's zero value for an invalid address.
+	 */
+	override fn Read(address: int) T
+	{
+		if (!IsValidAddress(address)) {
+			var zero: T
+			return zero
+		}
+
+		return storage[address]
+	}
+
+	/**
+	 * Writes one cell; invalid addresses leave storage unchanged.
+	 */
+	override fn Write(address: int, value: T)
+	{
+		if (IsValidAddress(address)) {
+			storage[address] = value
+		}
+	}
+
+	/**
+	 * Reports whether the address fits the owned array.
+	 */
+	override fn IsValidAddress(address: int) bool
+	{
+		return address >= 0 && address < CAPACITY
+	}
+}

@@ -1,0 +1,130 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Deterministic NOR transaction double. Captures complete addressed commands and
+ * injects busy or rejected-write status. One test owner resets before each case.
+ */
+component SPIFlashTestTransport : ISPITransactions
+{
+	// Observed commands and address/payload bytes from the latest addressed command.
+	public selections: int
+	public selected: bool
+	public lastCommand: byte
+	captured: byte[260]
+	public capturedLength: int
+
+	// Injected status and per-transaction position.
+	public busy: bool
+	public rejectWrites: bool
+	writeEnabled: bool
+	command: byte
+	position: int
+
+	/**
+	 * Reads one captured command byte; valid only below capturedLength.
+	 */
+	public fn GetCapturedByte(index: int) byte
+	{
+		return captured[index]
+	}
+
+	/**
+	 * Clears observations and injected failures between test cases.
+	 */
+	public fn Reset()
+	{
+		selections = 0
+		selected = false
+		lastCommand = 0x00
+		capturedLength = 0
+		busy = false
+		rejectWrites = false
+		writeEnabled = false
+		position = 0
+	}
+
+	/**
+	 * Begins a transaction and counts its selection.
+	 */
+	override fn Select()
+	{
+		assert !selected
+		selected = true
+		selections++
+		position = 0
+	}
+
+	/**
+	 * Captures addressed commands and supplies deterministic status/read bytes.
+	 */
+	override fn Transfer(value: byte) byte
+	{
+		assert selected
+
+		if (position == 0) {
+			command = value
+
+			if (command == 0x03 || command == 0x02 || command == 0x20) {
+				lastCommand = command
+				capturedLength = 0
+			}
+		}
+
+		if (command == 0x03 || command == 0x02 || command == 0x20) {
+			captured[capturedLength] = value
+			capturedLength++
+		}
+
+		position++
+
+		if (command == 0x9F) {
+			if (position == 2) {
+				return 0xEF
+			}
+
+			if (position == 3) {
+				return 0x40
+			}
+
+			if (position == 4) {
+				return 0x17
+			}
+		}
+
+		if (command == 0x05) {
+			if (busy) {
+				return 0x01
+			}
+
+			if (writeEnabled) {
+				return 0x02
+			}
+		}
+
+		if (command == 0x03 && position > 4) {
+			return (position - 5) as byte
+		}
+
+		return 0x00
+	}
+
+	/**
+	 * Ends a command and models the write-enable latch.
+	 */
+	override fn Deselect()
+	{
+		assert selected
+		selected = false
+
+		if (command == 0x06 && !rejectWrites) {
+			writeEnabled = true
+		}
+
+		if (command == 0x02 || command == 0x20) {
+			assert writeEnabled
+			writeEnabled = false
+		}
+	}
+}

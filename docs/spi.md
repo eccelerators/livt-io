@@ -9,28 +9,35 @@ types:
 ## Timing and context
 
 The controller requests a 50 ns half-period and converts it with
-`this.context.TicksFor(50ns)` during construction. The containing component
+`this.context.TicksFor(halfPeriod)` during construction (the optional `halfPeriod` argument defaults to 50 ns). The containing component
 supplies the context automatically. Instantiate the master inside the desired
 clock context so construction and the controller process use the same domain.
 
 The conversion rounds positive durations up to at least one tick. Examples:
 
-| Context clock | Half-period ticks | Resulting SCLK |
+| Context clock | Requested half-period ticks | Intra-byte SCLK |
 | --- | ---: | ---: |
-| 100 MHz | 5 | 10 MHz |
-| 50 MHz | 3 | approximately 8.33 MHz |
+| 100 MHz | 5 | approximately 8.33 MHz |
+| 50 MHz | 3 | 6.25 MHz |
 
-The rounded result does not exceed the requested 10 MHz bus frequency.
+High phases last the requested number of ticks. Low phases between bits add two
+controller ticks to advance the bit index and drive MOSI. Byte boundaries add
+command scheduling latency. The resulting clock never exceeds the requested
+maximum bus frequency.
 
 ## Startup and reset
 
-The controller starts idle with deterministic outputs and state:
+After constructor initialization, the controller is idle with these outputs and state:
 
 - SCLK is low;
 - MOSI is low;
 - active-low chip select is high;
 - `IsBusy()`, `IsSelected()`, and `HasResult()` return `false`;
 - `GetReceivedByte()` returns `0x00` until the first transfer completes.
+
+Board wiring must hold physical chip select high during reset and until the
+initialized idle-high signal has been observed. This prevents a chip-select pulse
+from zero-valued generated interface registers before initialization.
 
 ## Transaction flow
 

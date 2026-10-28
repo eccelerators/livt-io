@@ -1,11 +1,47 @@
 # Changelog
 
-## Unreleased
+## 1.5.0
+
+### Added
+
+- `ISPITransactions` and `SPITransactions`: scheduled, exclusive Mode 0
+  transactions over an owned `SPIMaster`, with context-derived timing.
+- `ISPIFlash` and `SPIFlash`: JEDEC identification, buffered reads, page-fragment
+  programming, aligned sector erase, write-enable checks and bounded readiness
+  polling for single-lane SPI NOR with 24-bit addresses (up to 16 MiB).
+- Consumer-selected flash staging storage through `MemoryStyle` and an optional
+  `IRam<byte>` provider. Block-style RAM is the default; distributed RAM and
+  custom storage implementations are supported.
+- `ArrayRam<T, CAPACITY>`: scheduled, resettable logic-array storage implementing
+  `IRam<T>`, for consumers that need zeroed payload on reset.
+- Regression coverage for transaction timing across clock contexts, flash
+  commands and failure paths, staging storage, and array-backed memory.
+
+### Changed
+
+- Split SPI bit advancement into an explicit state to retain transfer phase
+  transitions. SPI transfer timing tests cover byte reception and clock edges.
+- Document flash ownership, staging initialization, timeout behavior, storage
+  selection and board integration requirements.
+
+### Fixed
 
 - Keep MII discard metadata stable until transmit acknowledgement. Late abort or
   link loss now affects only the MAC-domain completion result, avoiding an unsafe
   update across clock domains. Add late-abort/link-loss regression coverage and
   document bounded mailbox payload timing.
+
+### Compatibility and dependencies
+
+- Existing public APIs remain available. Depend on `Livt.Collections 1.4.0`.
+- `SPITransactions` defaults to a 100 ns half-period and requires at least five
+  context ticks per half-period; choose a longer duration for slower contexts or
+  registered physical adapters. Do not assume a fixed byte-transfer cycle count.
+- Flash capacity and geometry must match the device. The driver does not clear
+  protection bits, perform chip erase, or manage application partitions.
+  Program completion means the device is ready; read back to verify contents.
+- Inferred RAM payload survives reset; `ArrayRam` resets its payload to zero.
+  Flash staging initializes to zero on first use after reset with every backend.
 
 ## 1.4.0
 

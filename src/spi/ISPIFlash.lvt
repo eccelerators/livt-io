@@ -1,0 +1,54 @@
+namespace Livt.IO
+
+/**
+ * Single-owner NOR flash access with a reusable staging buffer. All addresses and
+ * lengths are bytes. Calls run in the caller's context and complete before return.
+ * Failed operations may have changed flash or staging data; callers must validate
+ * content before publishing it. Reset does not undo an external erase/program.
+ */
+interface ISPIFlash
+{
+	/**
+	 * Returns the configured accessible byte capacity.
+	 */
+	fn GetCapacity() int
+
+	/**
+	 * Returns the staging-buffer capacity, equal to the device page size.
+	 */
+	fn GetPageSize() int
+
+	/**
+	 * Returns the aligned erase-sector size in bytes.
+	 */
+	fn GetSectorSize() int
+
+	/**
+	 * Stores a staging byte; returns false for an out-of-range index.
+	 */
+	fn SetByte(index: int, value: byte) bool
+
+	/**
+	 * Returns a staging byte, or zero for an out-of-range index.
+	 */
+	fn GetByte(index: int) byte
+
+	/**
+	 * Reads 1..GetPageSize() bytes into staging after waiting for flash readiness.
+	 * Returns false on invalid range or timeout. The remainder of staging is unchanged.
+	 */
+	fn Read(address: int, length: int) bool
+
+	/**
+	 * Programs staging bytes 0..length into one page and waits for completion.
+	 * Requires previously erased destination bits; no implicit erase or verification.
+	 * Invalid ranges and page crossings return false without accessing the bus.
+	 */
+	fn ProgramPage(address: int, length: int) bool
+
+	/**
+	 * Erases one aligned sector and waits for completion. Invalid addresses return
+	 * false without bus activity. Success reports ready, not readback verification.
+	 */
+	fn EraseSector(address: int) bool
+}

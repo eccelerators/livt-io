@@ -7,7 +7,7 @@ separate `Ram` or `Uart` packages.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and migration details.
 
-The 1.4.0 package surface is intentionally small and hardware-oriented:
+Version 1.5.0 provides the following hardware components:
 
 - `Livt.IO.Ram<T, CAPACITY, STYLE>`: scheduled element-addressable memory implementing `IRam<T>`.
 - `Livt.IO.BlockRam<T, CAPACITY>` / `DistributedRam<T, CAPACITY>`: inherited storage-style specializations.
@@ -15,6 +15,7 @@ The 1.4.0 package surface is intentionally small and hardware-oriented:
 - `Livt.IO.AsynchronousRam<T, ADDRESS, CAPACITY, STYLE>`: combinational reads and clocked writes.
 - `Livt.IO.AsynchronousDistributedRam<T, ADDRESS, CAPACITY>`: inherited distributed-style port core.
 - `ISynchronousRam` / `IAsynchronousRam`: separate timing contracts; `RamAccess` accepts a custom synchronous provider.
+- `Livt.IO.ArrayRam<T, CAPACITY>`: scheduled, resettable logic-array storage implementing `IRam<T>`.
 - `Livt.IO.Ram16` / `Ram32`: 2048-element block-style specializations.
 - `Livt.IO.AsynchronousDistributedRam32x16`, `AsynchronousDistributedRam32x32`, `AsynchronousDistributedRam8x64`: inherited asynchronous specializations.
 - `Livt.IO.UartReceiver`: compile-time-configurable UART receive block.
@@ -40,12 +41,14 @@ The 1.4.0 package surface is intentionally small and hardware-oriented:
 - `Livt.IO.Phy.Rtl8201Phy` / `Rtl8211Phy`: PHY configuration and link monitoring.
 - `Livt.IO.SPIBus`: push-pull, single-data-lane SPI bus contract.
 - `Livt.IO.SPIMaster`: context-timed, byte-level SPI Mode 0 controller.
+- `Livt.IO.ISPITransactions` / `SPITransactions`: scheduled, exclusive SPI transactions.
+- `Livt.IO.ISPIFlash` / `SPIFlash`: SPI NOR identification, reads, page programming and sector erase with selectable staging storage.
 
 ## 📦 Package
 
 ```toml
 [dependencies]
-"Livt.IO" = "1.4.0"
+"Livt.IO" = "1.5.0"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
@@ -66,6 +69,7 @@ in `Livt.IO`.
 | `AsynchronousDistributedRam<T, ADDRESS, CAPACITY>` | Yes | Inherited combinational-read core with Distributed intent |
 | `Ram<T, CAPACITY, STYLE>` | Yes | Scheduled Read/Write over one portable storage port |
 | `BlockRam<T, CAPACITY>`, `DistributedRam<T, CAPACITY>` | Yes | Compile-time style specializations |
+| `ArrayRam<T, CAPACITY>` | Yes | Scheduled logic-array storage with zeroed payload on reset |
 | `RamAccess<T, ADDRESS, ELEMENT_COUNT, STORAGE>` | Yes | Scheduled access over an injected synchronous provider |
 | `Ram16` | Yes | Fixed 2048-word memory with 16-bit reads and writes |
 | `Ram32` | Yes | Fixed 2048-word memory with 32-bit reads and writes |
@@ -95,6 +99,8 @@ in `Livt.IO`.
 | `Phy.Rtl8211Phy<PHY_ADDRESS, POLL>` | Yes | RTL8211F configuration, restart and 100-full link monitoring |
 | `SPIBus` | Yes | Push-pull, single-data-lane SPI bus interface |
 | `SPIMaster` | Yes | Byte-level SPI Mode 0 master with context-derived timing |
+| `ISPITransactions` / `SPITransactions` | Yes | Scheduled select, byte transfer and deselect operations |
+| `ISPIFlash` / `SPIFlash` | Yes | Single-lane SPI NOR commands with configurable geometry and staging storage |
 
 ## 🔌 API Overview
 
@@ -107,7 +113,11 @@ invalid writes do nothing. Default capacity is 64. `BlockRam<T>` defaults to
 2048 elements; `DistributedRam<T>` defaults to 64. `Ram16` and `Ram32`
 inherit 2048-element block-style RAM with 16-/32-bit logic-vector payloads.
 
-All portable RAM implementations are now Livt source. Cells are unspecified
+For a resettable logic-array backend, use `ArrayRam<T, CAPACITY>` (default
+capacity 64). It implements the same `IRam<T>` API and zeroes every cell on reset.
+See [memory storage choices](docs/memory.md).
+
+The inferred RAM implementations are Livt source. Their cells are unspecified
 until written and survive reset. Reset cancels scheduled calls; it does not
 erase memory. Applications needing zeros must explicitly write them first.
 
@@ -336,6 +346,27 @@ At startup and reset, the controller is idle and deselected: SCLK and MOSI are
 low, chip select is high, and `HasResult()` is false. The first received byte is
 `0x00`.
 
+### SPI NOR flash
+
+`SPITransactions` owns an `SPIMaster` and provides scheduled `Select()`,
+`Transfer(value)` and `Deselect()` calls through `ISPITransactions`. One caller
+serializes complete transactions. Its default half-period is 100 ns and must
+cover at least five ticks of the inherited context.
+
+`SPIFlash` borrows a transaction provider through `ISPITransactions` and exposes
+`ISPIFlash`: `ReadJedecId()`, `Read()`, `SetByte()`, `ProgramPage()`,
+`EraseSector()` and `GetByte()`. Configure the device capacity (up to 16 MiB),
+page/sector geometry and readiness timeout to match the NOR device.
+
+Page staging defaults to block-style RAM. Select distributed storage through
+`MemoryStyle`, or supply an `IRam<byte>` implementation such as `ArrayRam` for
+resettable logic-array storage. Staging is initialized to zero on first use
+after reset. Applications own partition boundaries, recovery and read-back
+verification; a completed program operation alone does not verify stored bytes.
+
+See [SPI NOR flash](docs/spi-flash.md) for generic parameters, storage examples,
+timing requirements and limitations.
+
 ## 🧪 Build and Test
 
 ```sh
@@ -351,7 +382,7 @@ livt test
 
 Short examples live in [`docs/usage.md`](docs/usage.md). Protocol details and
 caveats live in [Ethernet](docs/ethernet.md), [RTL8211F management](docs/rtl8211.md),
-[I2C](docs/i2c.md) and [SPI](docs/spi.md).
+[I2C](docs/i2c.md), [SPI](docs/spi.md) and [SPI NOR flash](docs/spi-flash.md).
 Hardware and synthesis notes live in
 [`docs/hardware-notes.md`](docs/hardware-notes.md).
 

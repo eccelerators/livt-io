@@ -1,0 +1,281 @@
+namespace Livt.IO
+
+/**
+ * Standard single-lane, 24-bit-address SPI NOR commands over a borrowed transport.
+ * Owns one page staging buffer and a context-timed readiness deadline. One owner
+ * serializes calls and retains exclusive transport access. Devices must already
+ * be in ordinary SPI command mode; board-specific configuration handover is external.
+ * Capacity and erase geometry must match the device. No chip erase, protection
+ * changes, quad mode, four-byte addresses or implicit retries of writes.
+ * STYLE selects the default RAM preference. B can replace the owned buffer, including
+ * ArrayRam for resettable logic storage; it must provide at least PAGE_SIZE bytes.
+ * Access and initialization guarantees are independent of backing.
+ */
+component SPIFlash<T: ISPITransactions, CAPACITY: int, PAGE_SIZE: int = 256,
+	SECTOR_SIZE: int = 4096, ERASE_COMMAND: byte = 0x20, TIMEOUT: Time = 2s, STYLE: MemoryStyle = MemoryStyle.Block,
+	B: IRam<byte> & new() = Ram<byte, PAGE_SIZE, STYLE>> : ISPIFlash
+{
+	static assert CAPACITY > 0 && CAPACITY <= 16777216, "Capacity must fit 24-bit addressing"
+	static assert PAGE_SIZE > 0 && PAGE_SIZE <= CAPACITY, "Page size must fit capacity"
+	static assert SECTOR_SIZE >= PAGE_SIZE && SECTOR_SIZE % PAGE_SIZE == 0, "Sectors must contain whole pages"
+	static assert CAPACITY % SECTOR_SIZE == 0, "Capacity must contain whole sectors"
+	static assert TIMEOUT > 0ns, "Readiness timeout must be positive"
+
+	// Standard NOR instructions and status masks.
+	const READ: byte = 0x03
+	const PROGRAM: byte = 0x02
+	const WRITE_ENABLE: byte = 0x06
+	const READ_STATUS: byte = 0x05
+	const BUSY: int = 1
+	const WRITE_ENABLED: int = 2
+
+	// Borrowed exclusive transaction transport and owned page staging storage.
+	transport: T
+	buffer: B
+	bufferInitialized: bool
+
+	// Free-running context ticks; unsigned subtraction tolerates one wrap.
+	ticks: uint
+	timeoutTicks: uint
+
+	/**
+	 * Binds an exclusive transport; staging is zeroed lazily before its first use.
+	 * Construction and staging initialization never access the SPI device.
+	 * TIMEOUT must fit the context's unsigned tick range.
+	 */
+	new(transport: T)
+	{
+		this.transport = transport
+		buffer = new B()
+		timeoutTicks = context.TicksFor(TIMEOUT)
+		assert timeoutTicks > 0, "Timeout must fit the context tick range"
+	}
+
+	/**
+	 * Preserves zero-initialized staging semantics without resettable payload registers.
+	 * The exclusive caller initializes staging RAM once before its first staging access.
+	 */
+	fn InitializeBuffer()
+	{
+		if (!bufferInitialized) {
+			for (var index = 0; index < PAGE_SIZE; index++) {
+				buffer.Write(index, 0x00)
+			}
+
+			bufferInitialized = true
+		}
+	}
+
+	/**
+	 * Advances readiness time independently of scheduled SPI operations.
+	 */
+	process Clock()
+	{
+		state {
+			ticks++
+		}
+	}
+
+	/**
+	 * Reads manufacturer/type/capacity as a 24-bit JEDEC identity. Caller verifies
+	 * device geometry before mounting writable storage. Requires ordinary SPI mode;
+	 * this does not reset the device, clear protection, or cancel an ongoing write.
+	 */
+	public fn ReadJedecId() uint
+	{
+		transport.Select()
+		transport.Transfer(0x9F)
+		var manufacturer = transport.Transfer(0x00)
+		var kind = transport.Transfer(0x00)
+		var capacity = transport.Transfer(0x00)
+		transport.Deselect()
+		return ((manufacturer as uint) << 16) | ((kind as uint) << 8) | (capacity as uint)
+	}
+
+	/**
+	 * Returns the configured byte capacity.
+	 */
+	override fn GetCapacity() int
+	{
+		return CAPACITY
+	}
+
+	/**
+	 * Returns the page and staging-buffer size.
+	 */
+	override fn GetPageSize() int
+	{
+		return PAGE_SIZE
+	}
+
+	/**
+	 * Returns the configured erase-sector size.
+	 */
+	override fn GetSectorSize() int
+	{
+		return SECTOR_SIZE
+	}
+
+	/**
+	 * Writes staging only when index fits the page buffer.
+	 */
+	override fn SetByte(index: int, value: byte) bool
+	{
+		if (index < 0 || index >= PAGE_SIZE) {
+			return false
+		}
+
+		InitializeBuffer()
+		buffer.Write(index, value)
+		return true
+	}
+
+	/**
+	 * Returns staging content, or zero outside its bounds.
+	 */
+	override fn GetByte(index: int) byte
+	{
+		if (index < 0 || index >= PAGE_SIZE) {
+			return 0x00
+		}
+
+		InitializeBuffer()
+		return buffer.Read(index)
+	}
+
+	/**
+	 * Checks a complete transfer without overflowing address arithmetic.
+	 */
+	fn IsValidRange(address: int, length: int) bool
+	{
+		return address >= 0 && length > 0 && length <= PAGE_SIZE && address <= CAPACITY - length
+	}
+
+	/**
+	 * Sends a command and three address bytes with chip select held active.
+	 */
+	fn BeginAddress(command: byte, address: int)
+	{
+		transport.Select()
+		transport.Transfer(command)
+		transport.Transfer((address >> 16) as byte)
+		transport.Transfer((address >> 8) as byte)
+		transport.Transfer(address as byte)
+	}
+
+	/**
+	 * Samples status register one and releases the bus.
+	 */
+	fn ReadStatus() int
+	{
+		transport.Select()
+		transport.Transfer(READ_STATUS)
+		var status = transport.Transfer(0x00)
+		transport.Deselect()
+		return status as int
+	}
+
+	/**
+	 * Polls WIP until ready or the context deadline expires. Releases chip select
+	 * after every poll. A timeout does not cancel an external operation.
+	 */
+	fn WaitReady() bool
+	{
+		var started = ticks
+
+		while (true) {
+			var status = ReadStatus()
+
+			if ((status & BUSY) == 0) {
+				return true
+			}
+
+			if (ticks - started >= timeoutTicks) {
+				return false
+			}
+		}
+	}
+
+	/**
+	 * Waits for readiness, issues WREN and verifies the write-enable latch.
+	 */
+	fn EnableWrite() bool
+	{
+		if (!WaitReady()) {
+			return false
+		}
+
+		transport.Select()
+		transport.Transfer(WRITE_ENABLE)
+		transport.Deselect()
+		return (ReadStatus() & WRITE_ENABLED) != 0
+	}
+
+	/**
+	 * Reads a bounded sequential range into staging, including across page boundaries.
+	 */
+	override fn Read(address: int, length: int) bool
+	{
+		if (!IsValidRange(address, length)) {
+			return false
+		}
+
+		if (!WaitReady()) {
+			return false
+		}
+
+		InitializeBuffer()
+		BeginAddress(READ, address)
+
+		for (var index = 0; index < length; index++) {
+			var value = transport.Transfer(0x00)
+			buffer.Write(index, value)
+		}
+
+		transport.Deselect()
+		return true
+	}
+
+	/**
+	 * Programs one bounded page fragment and waits for WIP to clear.
+	 */
+	override fn ProgramPage(address: int, length: int) bool
+	{
+		if (!IsValidRange(address, length) || length > PAGE_SIZE - address % PAGE_SIZE) {
+			return false
+		}
+
+		if (!EnableWrite()) {
+			return false
+		}
+
+		InitializeBuffer()
+		BeginAddress(PROGRAM, address)
+
+		for (var index = 0; index < length; index++) {
+			var value = buffer.Read(index)
+			transport.Transfer(value)
+		}
+
+		transport.Deselect()
+		return WaitReady()
+	}
+
+	/**
+	 * Erases exactly one aligned sector and waits for WIP to clear.
+	 */
+	override fn EraseSector(address: int) bool
+	{
+		if (address < 0 || address > CAPACITY - SECTOR_SIZE || address % SECTOR_SIZE != 0) {
+			return false
+		}
+
+		if (!EnableWrite()) {
+			return false
+		}
+
+		BeginAddress(ERASE_COMMAND, address)
+		transport.Deselect()
+		return WaitReady()
+	}
+}

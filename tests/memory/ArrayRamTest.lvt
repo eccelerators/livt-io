@@ -1,0 +1,42 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Logic-array storage rejects invalid addresses without corrupting boundary cells.
+ */
+@Test
+component ArrayRamTest
+{
+	// Non-power-of-two capacity exercises the unused address range.
+	memory: ArrayRam<byte, 3>
+
+	/**
+	 * Creates fresh zero-initialized logic storage.
+	 */
+	new()
+	{
+		memory = new ArrayRam<byte, 3>()
+	}
+
+	/**
+	 * Checks initialization, both valid ends and writes beyond either end.
+	 */
+	@Test
+	fn PreservesBoundsAndOtherCells()
+	{
+		assert memory.Read(0) == 0
+		assert memory.Read(2) == 0
+		memory.Write(0, 0xA5)
+		memory.Write(2, 0x5A)
+		memory.Write(-1, 0xFF)
+		memory.Write(3, 0xFF)
+		assert memory.Read(0) == 0xA5
+		assert memory.Read(1) == 0
+		assert memory.Read(2) == 0x5A
+		assert memory.Read(-1) == 0
+		assert memory.Read(3) == 0
+		assert memory.IsValidAddress(2)
+		assert !memory.IsValidAddress(3)
+	}
+}

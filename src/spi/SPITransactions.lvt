@@ -1,0 +1,69 @@
+namespace Livt.IO
+
+/**
+ * Scheduled Mode 0 facade over an owned SPIMaster, borrowing one physical bus.
+ * One caller owns complete transactions; do not interleave clients. Construction
+ * and reset leave chip select inactive. Inherits the caller's clock context.
+ */
+component SPITransactions : ISPITransactions
+{
+	// Covers the registered signal-interface round trip of the owned master.
+	const MIN_PHASE_TICKS: uint = 5
+
+	// Owned signal-level controller; never shared with another transaction owner.
+	master: SPIMaster
+
+	/**
+	 * Binds the bus exclusively. halfPeriod is rounded up to context ticks and
+	 * must cover at least five ticks for the nested signal-interface round trip.
+	 */
+	new(bus: flip SPIBus, halfPeriod: const Time = 100ns)
+	{
+		assert context.TicksFor(halfPeriod) >= MIN_PHASE_TICKS, "SPI transaction half-period must cover at least five context ticks"
+		master = new SPIMaster(bus, halfPeriod)
+	}
+
+	/**
+	 * Waits until chip-select assertion and setup time have completed.
+	 */
+	override fn Select()
+	{
+		var accepted = master.BeginSelect()
+		assert accepted, "SPI selection requires an idle, deselected bus"
+
+		while (master.IsBusy()) {
+			state {
+			}
+		}
+	}
+
+	/**
+	 * Waits for one full-duplex transfer and returns the sampled byte.
+	 */
+	override fn Transfer(value: byte) byte
+	{
+		var accepted = master.BeginTransfer(value)
+		assert accepted, "SPI transfer requires an idle, selected bus"
+
+		while (master.IsBusy()) {
+			state {
+			}
+		}
+
+		return master.GetReceivedByte()
+	}
+
+	/**
+	 * Waits until chip-select hold time and deassertion have completed.
+	 */
+	override fn Deselect()
+	{
+		var accepted = master.BeginDeselect()
+		assert accepted, "SPI deselection requires an idle, selected bus"
+
+		while (master.IsBusy()) {
+			state {
+			}
+		}
+	}
+}

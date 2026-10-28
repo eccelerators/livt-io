@@ -332,7 +332,14 @@ component SPIMasterTest
 		assert this.bus.GetClockEdgeInterval(0) >= expectedHalfPeriod
 
 		for (var edgeIndex = 1; edgeIndex < 16; edgeIndex++) {
-			assert this.bus.GetClockEdgeInterval(edgeIndex) == expectedHalfPeriod
+			// Low phases include two controller cycles for advancing and driving MOSI.
+			var expectedInterval = expectedHalfPeriod
+
+			if (edgeIndex % 2 == 0) {
+				expectedInterval = expectedInterval + 2
+			}
+
+			assert this.bus.GetClockEdgeInterval(edgeIndex) == expectedInterval
 		}
 	}
 
@@ -521,7 +528,14 @@ component SPIMasterSlowContextTest
 		assert this.bus.GetClockEdgeInterval(0) >= 3
 
 		for (var edgeIndex = 1; edgeIndex < 16; edgeIndex++) {
-			assert this.bus.GetClockEdgeInterval(edgeIndex) == 3
+			// Low phases include two controller cycles for advancing and driving MOSI.
+			var expectedInterval = 3
+
+			if (edgeIndex % 2 == 0) {
+				expectedInterval = expectedInterval + 2
+			}
+
+			assert this.bus.GetClockEdgeInterval(edgeIndex) == expectedInterval
 		}
 
 		assert this.master.BeginDeselect() == true
@@ -584,7 +598,14 @@ component SPIMasterConfiguredTimingTest
 		assert this.bus.GetClockEdgeInterval(0) >= 5
 
 		for (var edgeIndex = 1; edgeIndex < 16; edgeIndex++) {
-			assert this.bus.GetClockEdgeInterval(edgeIndex) == 5
+			// Low phases include two controller cycles for advancing and driving MOSI.
+			var expectedInterval = 5
+
+			if (edgeIndex % 2 == 0) {
+				expectedInterval = expectedInterval + 2
+			}
+
+			assert this.bus.GetClockEdgeInterval(edgeIndex) == expectedInterval
 		}
 
 		assert this.master.BeginDeselect() == true

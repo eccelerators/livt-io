@@ -1,0 +1,92 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Verifies fresh staging RAM is zeroed lazily without accessing the SPI device.
+ */
+@Test
+@Context(ClockFrequency = 50MHz)
+component SPIFlashStagingTest
+{
+	// Alternate staging implementations share a transport through serialized test calls.
+	array: SPIFlash<SPIFlashTestTransport, 1048576, 256, 4096, 0x20, 2s, MemoryStyle.Auto, ArrayRam<byte, 256>>
+	transport: SPIFlashTestTransport
+	flash: SPIFlash<SPIFlashTestTransport, 1048576>
+	automatic: SPIFlash<SPIFlashTestTransport, 1048576, 256, 4096, 0x20, 2s, MemoryStyle.Auto>
+	distributed: SPIFlash<SPIFlashTestTransport, 1048576, 256, 4096, 0x20, 2s, MemoryStyle.Distributed>
+
+	/**
+	 * Creates fresh staging storage in the test context.
+	 */
+	new()
+	{
+		transport = new SPIFlashTestTransport()
+		array = new SPIFlash<SPIFlashTestTransport, 1048576, 256, 4096, 0x20, 2s, MemoryStyle.Auto, ArrayRam<byte, 256>>(transport)
+		flash = new SPIFlash<SPIFlashTestTransport, 1048576>(transport)
+		automatic = new SPIFlash<SPIFlashTestTransport, 1048576, 256, 4096, 0x20, 2s, MemoryStyle.Auto>(transport)
+		distributed = new SPIFlash<SPIFlashTestTransport, 1048576, 256, 4096, 0x20, 2s, MemoryStyle.Distributed>(transport)
+	}
+
+	/**
+	 * First access initializes both ends; later writes preserve unrelated bytes.
+	 */
+	@Test
+	fn InitializesZerosAndPreservesOtherBytes()
+	{
+		transport.Reset()
+		assert flash.GetByte(255) == 0x00
+		assert flash.SetByte(255, 0xA5)
+		assert flash.GetByte(255) == 0xA5
+		assert flash.GetByte(0) == 0x00
+		assert flash.GetByte(127) == 0x00
+		assert transport.selections == 0
+	}
+
+	/**
+	 * Automatic storage preserves zero initialization, bounds and unrelated bytes.
+	 */
+	@Test
+	fn PreservesAutomaticStagingContract()
+	{
+		transport.Reset()
+		assert automatic.GetByte(255) == 0x00
+		assert automatic.SetByte(255, 0xA5)
+		assert automatic.GetByte(255) == 0xA5
+		assert automatic.GetByte(0) == 0x00
+		assert !automatic.SetByte(256, 0xFF)
+		assert automatic.GetByte(-1) == 0x00
+		assert transport.selections == 0
+	}
+
+	/**
+	 * Distributed storage preserves zero initialization, bounds and unrelated bytes.
+	 */
+	@Test
+	fn PreservesDistributedStagingContract()
+	{
+		transport.Reset()
+		assert distributed.GetByte(255) == 0x00
+		assert distributed.SetByte(255, 0xA5)
+		assert distributed.GetByte(255) == 0xA5
+		assert distributed.GetByte(0) == 0x00
+		assert !distributed.SetByte(256, 0xFF)
+		assert distributed.GetByte(-1) == 0x00
+		assert transport.selections == 0
+	}
+	/**
+	 * Array storage preserves zero initialization, bounds and unrelated bytes.
+	 */
+	@Test
+	fn PreservesArrayStagingContract()
+	{
+		transport.Reset()
+		assert array.GetByte(255) == 0x00
+		assert array.SetByte(255, 0xA5)
+		assert array.GetByte(255) == 0xA5
+		assert array.GetByte(0) == 0x00
+		assert !array.SetByte(256, 0xFF)
+		assert array.GetByte(-1) == 0x00
+		assert transport.selections == 0
+	}
+}

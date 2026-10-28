@@ -1,0 +1,24 @@
+namespace Livt.IO
+
+/**
+ * Scheduled, exclusive SPI byte transactions in the caller's context. One owner
+ * serializes Select, Transfer and Deselect. Calls complete before returning;
+ * Transfer requires selection. Reset releases chip select. No arbitration.
+ */
+interface ISPITransactions
+{
+	/**
+	 * Asserts chip select and waits for setup time; requires an idle bus.
+	 */
+	fn Select()
+
+	/**
+	 * Exchanges a byte MSB first while keeping chip select asserted.
+	 */
+	fn Transfer(value: byte) byte
+
+	/**
+	 * Releases chip select after hold time; requires a selected bus.
+	 */
+	fn Deselect()
+}

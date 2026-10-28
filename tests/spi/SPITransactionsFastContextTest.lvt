@@ -1,0 +1,42 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Verifies scheduled transaction completion against the physical master state machine.
+ */
+@Test
+@Context(ClockFrequency = 100MHz)
+component SPITransactionsFastContextTest
+{
+	// Owned bus and scheduled master adapter.
+	bus: SPITransactionsLoopback
+	transactions: SPITransactions
+
+	/**
+	 * Constructs a loopback in the inherited 100 MHz context.
+	 */
+	new()
+	{
+		bus = new SPITransactionsLoopback()
+		transactions = new SPITransactions(bus, 50ns)
+	}
+
+	/**
+	 * Consecutive bytes share chip select and return exact full-duplex data.
+	 */
+	@Test
+	fn ExchangesBytesUnderOneSelection()
+	{
+		transactions.Select()
+		assert bus.chip_select_n == 0b0
+		assert transactions.Transfer(0xA5) == 0xA5
+		assert transactions.Transfer(0x3C) == 0x3C
+		transactions.Deselect()
+		assert bus.chip_select_n == 0b1
+		transactions.Select()
+		assert transactions.Transfer(0x81) == 0x81
+		transactions.Deselect()
+		assert bus.chip_select_n == 0b1
+	}
+}

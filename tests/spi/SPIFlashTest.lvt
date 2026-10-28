@@ -1,0 +1,130 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Verifies command sequencing, range rejection and context-timed busy handling.
+ */
+@Test
+@Context(ClockFrequency = 50MHz)
+component SPIFlashTest
+{
+	// Owned deterministic transport and production flash command engine.
+	transport: SPIFlashTestTransport
+	flash: SPIFlash<SPIFlashTestTransport, 1048576, 256, 4096, 0x20, 20us>
+
+	/**
+	 * Constructs the command engine in a 50 MHz test context.
+	 */
+	new()
+	{
+		transport = new SPIFlashTestTransport()
+		flash = new SPIFlash<SPIFlashTestTransport, 1048576, 256, 4096, 0x20, 20us>(transport)
+	}
+
+	/**
+	 * Reads sequential bytes with a big-endian 24-bit address across a page boundary.
+	 */
+	@Test
+	fn ReadsAcrossPageBoundary()
+	{
+		transport.Reset()
+		assert flash.Read(0x0123FE, 4)
+		assert transport.GetCapturedByte(1) == 0x01
+		assert transport.GetCapturedByte(2) == 0x23
+		assert transport.GetCapturedByte(3) == 0xFE
+		assert flash.GetByte(0) == 0x00
+		assert flash.GetByte(3) == 0x03
+		assert !transport.selected
+	}
+
+	/**
+	 * Checks WREN and staging byte order for a partial page.
+	 */
+	@Test
+	fn ProgramsPageFragment()
+	{
+		transport.Reset()
+		assert flash.SetByte(0, 0xAB)
+		assert flash.SetByte(1, 0xCD)
+		assert flash.ProgramPage(254, 2)
+		assert transport.lastCommand == 0x02
+		assert transport.capturedLength == 6
+		assert transport.GetCapturedByte(3) == 0xFE
+		assert transport.GetCapturedByte(4) == 0xAB
+		assert transport.GetCapturedByte(5) == 0xCD
+		assert !transport.selected
+	}
+
+	/**
+	 * Invalid ranges never start a bus transaction or wrap a page.
+	 */
+	@Test
+	fn RejectsInvalidRangesWithoutBusAccess()
+	{
+		transport.Reset()
+		assert !flash.ProgramPage(255, 2)
+		assert !flash.Read(-1, 1)
+		assert !flash.Read(1048576, 1)
+		assert !flash.Read(0, 257)
+		assert !flash.Read(0, 0)
+		assert !flash.EraseSector(1)
+		assert !flash.EraseSector(1048576)
+		assert transport.selections == 0
+		assert !flash.SetByte(256, 0x01)
+		assert flash.GetByte(-1) == 0x00
+	}
+
+	/**
+	 * Erases an aligned sector with exactly three address bytes.
+	 */
+	@Test
+	fn ErasesOneSector()
+	{
+		transport.Reset()
+		assert flash.EraseSector(4096)
+		assert transport.lastCommand == 0x20
+		assert transport.capturedLength == 4
+		assert transport.GetCapturedByte(2) == 0x10
+		assert !transport.selected
+	}
+
+	/**
+	 * A rejected WREN cannot issue a page-program command.
+	 */
+	@Test
+	fn RejectsDisabledWrites()
+	{
+		transport.Reset()
+		transport.rejectWrites = true
+		assert !flash.ProgramPage(0, 1)
+		assert transport.lastCommand == 0x00
+		assert !transport.selected
+	}
+
+	/**
+	 * A stuck busy flag returns failure and leaves chip select released.
+	 */
+	@Test
+	fn TimesOutBusyDevice()
+	{
+		transport.Reset()
+		transport.busy = true
+		assert !flash.Read(0, 1)
+		assert transport.selections > 1
+		assert !transport.selected
+	}
+	/**
+	 * Identity is read in manufacturer/type/capacity order without write enable.
+	 */
+	@Test
+	fn ReadsJedecIdentity()
+	{
+		transport.Reset()
+		assert flash.ReadJedecId() == 0xEF4017
+		assert transport.selections == 1
+		assert !transport.selected
+		assert transport.capturedLength == 0
+	}
+
+}

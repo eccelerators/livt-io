@@ -1,0 +1,17 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Mode 0 loopback bus: samples exactly the MOSI signal driven by the master.
+ */
+component SPITransactionsLoopback : SPIBus
+{
+	/**
+	 * Connects output data directly to input data without an extra clock domain.
+	 */
+	process Signals[]()
+	{
+		miso = mosi
+	}
+}

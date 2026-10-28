@@ -279,20 +279,17 @@ component SPIMaster
 				this.bus.sclk = 0b0
 				phaseTick = 0n0
 
-				if (bitIndex < 7) {
-					bitIndex = bitIndex + 1
-					var nextShiftedTransmit = (this.transmitByte as int) >> (7 - bitIndex)
+				goto TransferAdvance
+			}
+		}
 
-					if (nextShiftedTransmit % 2 == 0) {
-						this.bus.mosi = 0b0
-					} else {
-						this.bus.mosi = 0b1
-					}
-
-					goto TransferLowWait
-				} else {
-					goto TransferComplete
-				}
+		// Advance in a separate state so both branches retain explicit phase transitions.
+		state TransferAdvance {
+			if (bitIndex < 7) {
+				bitIndex = bitIndex + 1
+				goto TransferLowDrive
+			} else {
+				goto TransferComplete
 			}
 		}
 
