@@ -174,3 +174,20 @@ initial value must initialize their payload explicitly for every backend.
 `MemoryStyle.Auto` permits synthesis inference; it is not a register-only mode.
 `Block` and `Distributed` express synthesis preferences. Always inspect resource
 reports to confirm the chosen device's physical mapping.
+
+## Sequential scheduled access
+
+`SequentialRam<T, CAPACITY = 64, STYLE = MemoryStyle.Block>` implements
+`IRam<T>` with one command mailbox and an owned synchronous memory. Use it when
+one caller serializes all operations, or when an enclosing arbiter guarantees
+that reads and writes cannot overlap. It has no internal arbitration;
+use `Ram`/`RamAccess` to arbitrate overlapping read and write requests. Invalid reads return zero and invalid
+writes do nothing. Cells survive reset and unwritten cells are unspecified.
+Reset clears the response and cancels a pending command.
+
+This smaller access path suits CLI buffers and USB transfer/event storage whose
+owners already serialize access. A consumer's `IRam<T>` generic can still select
+`ArrayRam` for resettable logic arrays or another compatible backend.
+
+Both `SequentialRam` and `Ram` use single-port synchronous storage; `Ram` adds
+arbitration between pending read and write requests.

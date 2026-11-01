@@ -7,8 +7,9 @@ separate `Ram` or `Uart` packages.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and migration details.
 
-Version 1.5.0 provides the following hardware components:
+Version 1.6.0 provides the following hardware components:
 
+- `Livt.IO.SequentialRam<T, CAPACITY, STYLE>`: compact scheduled storage requiring sequential calls; no internal arbitration. Defaults to block RAM.
 - `Livt.IO.Ram<T, CAPACITY, STYLE>`: scheduled element-addressable memory implementing `IRam<T>`.
 - `Livt.IO.BlockRam<T, CAPACITY>` / `DistributedRam<T, CAPACITY>`: inherited storage-style specializations.
 - `Livt.IO.SynchronousRam<T, ADDRESS, CAPACITY, STYLE>`: one-edge read/write ports.
@@ -48,11 +49,29 @@ Version 1.5.0 provides the following hardware components:
 
 ```toml
 [dependencies]
-"Livt.IO" = "1.5.0"
+"Livt.IO" = "1.6.0"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
 should depend on `Livt.IO`; `Livt.IO` supersedes the standalone `Ram` and `Uart` packages for new code.
+
+## New in 1.6.0
+
+`SequentialRam<T, CAPACITY = 64, STYLE = MemoryStyle.Block>` adds a compact
+`IRam<T>` implementation for callers that complete each operation before starting
+the next. It uses one command path without internal arbitration and defaults to
+block RAM. For example:
+
+```livt
+storage: SequentialRam<byte, 512>
+```
+
+Use `Ram` when pending read and write requests need arbitration. Storage style
+remains configurable; consumers with an `IRam<T>` storage generic can instead
+select `ArrayRam` for resettable logic-array storage. See the
+[memory guide](docs/memory.md#sequential-scheduled-access) for access and reset rules.
+
+Existing public APIs and the `Livt.Collections 1.4.0` dependency remain unchanged.
 
 ## 📚 Namespaces
 
@@ -68,6 +87,7 @@ in `Livt.IO`.
 | `AsynchronousRam<T, ADDRESS, CAPACITY, STYLE>` | Yes | Combinational read and one clocked write port |
 | `AsynchronousDistributedRam<T, ADDRESS, CAPACITY>` | Yes | Inherited combinational-read core with Distributed intent |
 | `Ram<T, CAPACITY, STYLE>` | Yes | Scheduled Read/Write over one portable storage port |
+| `SequentialRam<T, CAPACITY, STYLE>` | Yes | Compact scheduled access when the caller serializes all operations |
 | `BlockRam<T, CAPACITY>`, `DistributedRam<T, CAPACITY>` | Yes | Compile-time style specializations |
 | `ArrayRam<T, CAPACITY>` | Yes | Scheduled logic-array storage with zeroed payload on reset |
 | `RamAccess<T, ADDRESS, ELEMENT_COUNT, STORAGE>` | Yes | Scheduled access over an injected synchronous provider |

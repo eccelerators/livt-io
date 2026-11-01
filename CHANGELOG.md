@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- `SequentialRam<T, CAPACITY = 64, STYLE = MemoryStyle.Block>`: compact scheduled
+  storage implementing `IRam<T>`, with one command path and no internal arbitration.
+  Each operation must complete before the next begins, including calls from
+  different processes. The default backend requests block RAM.
+- Regression coverage for read/write ordering, invalid addresses, non-power-of-two
+  capacity and 64-bit payloads in a single-cell memory.
+
+### Changed
+
+- Document when to use sequential access, arbitrated `Ram` access or direct
+  signal-level memory ports, with configurable storage backends.
+
+### Compatibility and dependencies
+
+- Existing public APIs remain unchanged.
+- Cells survive reset and unwritten cells are unspecified. Reset cancels a pending
+  operation and clears the read response. Invalid reads return zero; invalid writes
+  leave memory unchanged.
+- Continue to depend on `Livt.Collections 1.4.0`.
+
 ## 1.5.0
 
 ### Added

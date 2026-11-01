@@ -1,0 +1,58 @@
+namespace Livt.IO.Tests
+
+using Livt.IO
+
+/**
+ * Serialized memory contract: boundaries, read/write ordering and payload widths.
+ */
+@Test
+component SequentialRamTest
+{
+	// Independent fixtures cover narrow non-power-of-two and wide single-cell storage.
+	bytes: SequentialRam<byte, 3>
+	wide: SequentialRam<logic[64], 1, MemoryStyle.Distributed>
+
+
+	/**
+	 * Owns portable block-style and distributed-style memories.
+	 */
+	new()
+	{
+		bytes = new SequentialRam<byte, 3>()
+		wide = new SequentialRam<logic[64], 1, MemoryStyle.Distributed>()
+	}
+
+
+	/**
+	 * Checks ordered writes/reads and rejection of both invalid address boundaries.
+	 */
+	@Test
+	fn BoundariesAndOrdering()
+	{
+		assert bytes.IsValidAddress(0) && bytes.IsValidAddress(2)
+		assert !bytes.IsValidAddress(-1) && !bytes.IsValidAddress(3)
+		bytes.Write(0, 17)
+		bytes.Write(1, 34)
+		bytes.Write(2, 51)
+		bytes.Write(-1, 255)
+		bytes.Write(3, 255)
+		assert bytes.Read(-1) == 0 && bytes.Read(3) == 0
+		assert bytes.Read(0) == 17 && bytes.Read(1) == 34 && bytes.Read(2) == 51
+		bytes.Write(1, 68)
+		assert bytes.Read(1) == 68 && bytes.Read(0) == 17
+	}
+
+
+	/**
+	 * Preserves all 64 payload bits at capacity one without invalid-write aliasing.
+	 */
+	@Test
+	fn WideSingleCell()
+	{
+		wide.Write(0, 0xFEDCBA9876543210)
+		assert wide.Read(0) == 0xFEDCBA9876543210
+		wide.Write(1, 0)
+		assert wide.Read(0) == 0xFEDCBA9876543210
+		assert wide.Read(1) == 0
+	}
+}
