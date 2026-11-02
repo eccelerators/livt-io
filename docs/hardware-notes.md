@@ -26,11 +26,9 @@ boundary; ordinary `Ram<T, CAPACITY>` derives its address width automatically.
 
 `RamAccess` adds scheduled transactions over an exclusively owned synchronous
 provider. Pending reads and writes alternate; a read reserves the next edge for
-response capture. Scheduled method completion includes dispatcher overhead:
-the current native `Ram<byte, 3, Block>` regression measures 19 cycles for a
-valid uncontended write and 21 for a valid read, from the request sampling edge
-to completion. Contention adds latency. Use the port cores for throughput-critical
-datapaths rather than assuming scheduled methods complete in one clock.
+response capture. Scheduled method completion includes dispatcher overhead and
+contention can add latency. Use the port cores for throughput-critical datapaths;
+scheduled methods do not promise completion in one clock.
 
 Block and Distributed are compile-time hints; Auto leaves allocation open.
 Neither selects timing or changes reset behavior. An asynchronous read contract
@@ -64,9 +62,8 @@ wrapper, so it can determine counter widths without becoming runtime hardware.
 The intrinsic rounds to the nearest whole clock tick (ties upward, minimum one
 tick); achieved baud is `clock frequency / ticks per bit`.
 
-The validated matrix covers 12, 25, 50, 100, and 125 MHz at 9600, 115200,
-921600, and 1 Mbaud. Use at least 12 ticks per bit for the currently documented
-operating envelope, and check rounding error and the peer's clock tolerance.
+Use at least 12 ticks per bit for the currently documented operating envelope,
+and check rounding error and the peer's clock tolerance.
 This is not a guarantee for arbitrary clock/baud combinations or line disturbances.
 Baud arguments must be positive integral static values and are checked by the compiler;
 an inadequate clock-to-baud ratio is not currently rejected automatically.
@@ -125,14 +122,11 @@ is made. FIFO edge acceptance and API completion are distinct events.
 
 FIFO addresses and occupancy use capacity-derived widths, and payload arrays
 use `@UninitializedStorage` so reset does not erase their cells. Physical RAM
-inference and resource/timing comparisons remain target-dependent; the shared
-source alone does not establish lower physical cost than the archived baseline.
+inference and resource/timing costs remain target-dependent.
 
-RX/TX bit indices use three-bit vectors; the shared-UART verification harness
-checks that exact width in generated VHDL. Unsigned conversions are used for
+RX/TX bit indices use three-bit vectors. Unsigned conversions are used for
 indexing and comparison. Baud counters use `Bits.RequiredFor(TICKS_PER_BIT - 1)`;
-FIFO pointers/counts likewise use capacity-derived widths. These declarations are a source/generated-HDL
-contract, not evidence of reduced device resources without synthesis comparison.
+FIFO pointers/counts likewise use capacity-derived widths.
 
 ## Synthesis Notes
 

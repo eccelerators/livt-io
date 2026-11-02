@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.0
+
+### Added
+
+- `IReadOnlyBlockDevice`: transport-independent scheduled access to media geometry,
+  one retained block read, completion polling, byte access, cancellation and release.
+- `BlockReadState` distinguishes Idle, Active, Complete and Failed. Accepted reads
+  reserve the slot until release; only successful completion exposes payload bytes.
+- Public documentation for block ownership, backpressure, disconnect/reset behavior
+  and provider-selected block sizes, storage and timing.
+
+### Compatibility and dependencies
+
+- Existing APIs remain unchanged. Continue to use `Livt.Collections 1.4.0`.
+- The new contract introduces no USB or filesystem dependency and imposes no fixed
+  block size, memory implementation or scheduled-call cycle count.
+
 ## 1.6.0
 
 ### Added
@@ -86,13 +103,6 @@
   asynchronous reset assertion, local reset release, and board CDC/I/O constraints.
 - Full duplex only; no half-duplex collision handling or pause-frame flow control.
 
-### Validation
-
-- Five focused IO tests pass, plus two full-frame Livt.Net integration tests
-  covering 10 and 100 Mb/s, exact payload bytes, FCS, and ownership release.
-- These are simulation results. FPGA resource mapping, board timing, and live
-  MII hardware operation are not yet qualified.
-
 ### Changed
 
 - Keep MII fixtures and helpers as ordinary files under `tests/`, registered in
@@ -120,8 +130,7 @@
   state transitions, input sampling and stretching can reduce the achieved rate.
 - I2C timeout and NACK are distinct outcomes. ACK and NACK queries both return
   false after a timeout; callers must check `HasTimedOut()` before reading data.
-- I2C tests and consumer documentation follow the Livt design guide's layout,
-  ownership, clock/reset, acceptance and completion conventions.
+- Documented I2C ownership, clock/reset, acceptance and completion conventions.
 
 ### Upgrading from 1.2.0
 

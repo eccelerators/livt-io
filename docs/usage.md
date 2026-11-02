@@ -33,6 +33,17 @@ outside that range are ignored. Cells must be written before reading; reset
 retains their payloads. See [memory configuration and migration](memory.md) for
 storage styles, port-level access and custom backends.
 
+## Read-only block storage
+
+A consumer binds an `IReadOnlyBlockDevice` supplied by the composition root.
+Wait for `IsReady()` and inspect the geometry, then call `TryReadBlock(lba)`.
+Poll `GetReadState()` until Complete or Failed. Read bytes only after Complete,
+checking every `TryReadByte()` result, and finish with `ReleaseRead()`.
+
+The consumer can pause between bytes without losing the retained block. To stop
+an active read, call `CancelRead()`, wait for completion, then release it. See the
+[block-storage contract](block-storage.md) for failure and reset rules.
+
 ## UART Byte Send and Receive
 
 Capacities, frame format, and baud are compile-time component value parameters.

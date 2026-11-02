@@ -63,16 +63,6 @@ synchronize mailbox/clear controls; do not blanket-false-path the entire FIFO.
 The DP83848 datasheet is available at https://www.ti.com/lit/gpn/dp83848j .
 A board must supply its own I/O timing and clock/reset constraints.
 
-## Verification
-
-`livt test -R` runs 10/100 clock-domain loopback, repeated
-frames, abort/reuse, receive errors, odd nibble counts, overflow, and PHY recovery.
-These tests are behavioral verification, not board timing qualification.
-
-The MII fixtures are ordinary files in `tests/ethernet`, listed in `livt.toml`.
-Run one case with `livt test -R -r Mii100Test` or
-`livt test -R -r Dp83848PhyTest`.
-
 Commit/drop and acknowledgement/fault are held-data mailboxes. Bound the discard
 path to the transmitter to 20 ns (less than one 40 ns TX period) and the return
 fault path to MAC completion to 20 ns. Their controls pass through two-stage

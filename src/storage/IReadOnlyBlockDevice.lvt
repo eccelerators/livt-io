@@ -1,0 +1,63 @@
+namespace Livt.IO
+
+/**
+ * Retained asynchronous block-read lifecycle, independent of the transport.
+ */
+enum BlockReadState
+{
+	Idle
+	Active
+	Complete
+	Failed
+}
+
+/**
+ * Single-client read-only block device in one clock/reset context. Acceptance
+ * reserves one block; completion is retained until ReleaseRead. Only Complete
+ * exposes bytes, and unplug invalidates them. Calls are scheduled, not single-cycle.
+ * Consumers may pause arbitrarily between bytes without dropping data. No writes.
+ * Reset cancels scheduled work and discards ownership; payload need not be erased.
+ * Providers define block geometry, buffering and completion timing.
+ */
+interface IReadOnlyBlockDevice
+{
+	/**
+	 * Reports media readiness; does not reserve a request.
+	 */
+	fn IsReady() bool
+
+	/**
+	 * Returns addressable blocks, or zero before readiness/after unplug.
+	 */
+	fn GetBlockCount() uint
+
+	/**
+	 * Returns bytes per block, or zero when unavailable.
+	 */
+	fn GetBlockSize() int
+
+	/**
+	 * Accepts an in-range LBA only while ready and Idle; false changes nothing.
+	 */
+	fn TryReadBlock(lba: uint) bool
+
+	/**
+	 * Returns retained completion state; an accepted read is Active immediately.
+	 */
+	fn GetReadState() BlockReadState
+
+	/**
+	 * Reads a completed block byte without consuming it; invalid reads return false/zero.
+	 */
+	fn TryReadByte(index: int, value: out byte) bool
+
+	/**
+	 * Requests cancellation; completion becomes Failed after transport quiesces.
+	 */
+	fn CancelRead() bool
+
+	/**
+	 * Releases Complete/Failed; false while Idle/Active.
+	 */
+	fn ReleaseRead() bool
+}

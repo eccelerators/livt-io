@@ -1,14 +1,15 @@
 # Livt.IO
 
 `Livt.IO` provides reusable input/output components for the Livt base library.
-It combines byte- and word-addressable memory, UART serial I/O, Ethernet, and protocol bus
-helpers into one package so applications can depend on `Livt.IO` instead of
-separate `Ram` or `Uart` packages.
+It combines byte- and word-addressable memory, read-only block-device contracts,
+UART serial I/O, Ethernet, and protocol bus helpers into one package so applications
+can depend on `Livt.IO` instead of separate `Ram` or `Uart` packages.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and migration details.
 
-Version 1.6.0 provides the following hardware components:
+Version 1.7.0 provides the following hardware components and contracts:
 
+- `Livt.IO.IReadOnlyBlockDevice` / `BlockReadState`: transport-independent, retained block reads with explicit cancellation and release.
 - `Livt.IO.SequentialRam<T, CAPACITY, STYLE>`: compact scheduled storage requiring sequential calls; no internal arbitration. Defaults to block RAM.
 - `Livt.IO.Ram<T, CAPACITY, STYLE>`: scheduled element-addressable memory implementing `IRam<T>`.
 - `Livt.IO.BlockRam<T, CAPACITY>` / `DistributedRam<T, CAPACITY>`: inherited storage-style specializations.
@@ -49,29 +50,25 @@ Version 1.6.0 provides the following hardware components:
 
 ```toml
 [dependencies]
-"Livt.IO" = "1.6.0"
+"Livt.IO" = "1.7.0"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
 should depend on `Livt.IO`; `Livt.IO` supersedes the standalone `Ram` and `Uart` packages for new code.
 
-## New in 1.6.0
+## New in 1.7.0
 
-`SequentialRam<T, CAPACITY = 64, STYLE = MemoryStyle.Block>` adds a compact
-`IRam<T>` implementation for callers that complete each operation before starting
-the next. It uses one command path without internal arbitration and defaults to
-block RAM. For example:
+`IReadOnlyBlockDevice` separates block consumers from the transport supplying the
+media. One accepted read owns a retained block until explicit release. Only
+successful completion exposes bytes; consumers can pause between reads without
+losing data. `BlockReadState` distinguishes Idle, Active, Complete and Failed.
 
-```livt
-storage: SequentialRam<byte, 512>
-```
+The contract exposes media geometry, read acceptance, completion, byte access,
+cancellation and release. It does not prescribe a sector size, storage backend or
+fixed call latency. Providers and consumers share one clock/reset context and
+serialize scheduled calls. See [read-only block storage](docs/block-storage.md).
 
-Use `Ram` when pending read and write requests need arbitration. Storage style
-remains configurable; consumers with an `IRam<T>` storage generic can instead
-select `ArrayRam` for resettable logic-array storage. See the
-[memory guide](docs/memory.md#sequential-scheduled-access) for access and reset rules.
-
-Existing public APIs and the `Livt.Collections 1.4.0` dependency remain unchanged.
+Existing APIs and the `Livt.Collections 1.4.0` dependency remain unchanged.
 
 ## 📚 Namespaces
 
@@ -83,6 +80,7 @@ in `Livt.IO`.
 
 | Component | Synthesizable | Purpose |
 |---|---|---|
+| `IReadOnlyBlockDevice` / `BlockReadState` | Contract | Read-only block lifecycle independent of transport and buffering |
 | `SynchronousRam<T, ADDRESS, CAPACITY, STYLE>` | Yes | One enabled read or write per clock; registered read response |
 | `AsynchronousRam<T, ADDRESS, CAPACITY, STYLE>` | Yes | Combinational read and one clocked write port |
 | `AsynchronousDistributedRam<T, ADDRESS, CAPACITY>` | Yes | Inherited combinational-read core with Distributed intent |
@@ -123,6 +121,19 @@ in `Livt.IO`.
 | `ISPIFlash` / `SPIFlash` | Yes | Single-lane SPI NOR commands with configurable geometry and staging storage |
 
 ## 🔌 API Overview
+
+### Read-only block storage
+
+Bind an `IReadOnlyBlockDevice` provider through the consumer's constructor. Wait
+for readiness, submit an in-range LBA with `TryReadBlock()`, and poll
+`GetReadState()`. On Complete, read bytes with `TryReadByte()`; on Complete or
+Failed, call `ReleaseRead()` before submitting another request.
+
+`CancelRead()` requests cancellation and does not imply immediate completion.
+Disconnect invalidates retained bytes. Media geometry comes from `GetBlockCount()`
+and `GetBlockSize()`; the interface does not assume 512-byte sectors. Filesystems
+and transport-specific drivers remain separate from this common contract. See
+[block storage](docs/block-storage.md) for ownership, reset and provider rules.
 
 ### Memory
 
@@ -177,9 +188,7 @@ separate PHY clocks at 25 MHz or 2.5 MHz. The board provides clock/reset wiring,
 MDIO pads, and timing/CDC constraints.
 
 See [Ethernet contracts](docs/ethernet.md) and [MII integration](docs/mii.md)
-for construction, ownership, reset, and verification requirements. The new MII
-path passes focused simulation tests; board timing and hardware validation remain
-separate from those results.
+for construction, ownership, reset and physical integration requirements.
 
 ### UART
 
@@ -402,7 +411,8 @@ livt test
 
 Short examples live in [`docs/usage.md`](docs/usage.md). Protocol details and
 caveats live in [Ethernet](docs/ethernet.md), [RTL8211F management](docs/rtl8211.md),
-[I2C](docs/i2c.md), [SPI](docs/spi.md) and [SPI NOR flash](docs/spi-flash.md).
+[I2C](docs/i2c.md), [SPI](docs/spi.md), [SPI NOR flash](docs/spi-flash.md) and
+[read-only block storage](docs/block-storage.md).
 Hardware and synthesis notes live in
 [`docs/hardware-notes.md`](docs/hardware-notes.md).
 
@@ -415,7 +425,6 @@ Hardware and synthesis notes live in
 - Keep tests in `namespace Livt.IO.Tests`.
 - Use `byte` for byte-oriented public APIs.
 - Keep implementation notes and hardware caveats in `docs/hardware-notes.md`.
-- Do not add `COMPILER.md` unless there is a reproducible compiler bug.
 
 ## 🚧 Outlook
 
