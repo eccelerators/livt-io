@@ -40,6 +40,7 @@ component MiiAdapter : IEthernetMedia
 	// Owned receive/serialize engines and block-memory clock bridges.
 	receive: MiiReceiver
 	transmit: MiiTransmitter
+	completion: MiiCompletionReceiver
 	rxQueue: MiiClockBridge<2048>
 	txQueue: MiiClockBridge<2048>
 
@@ -55,9 +56,7 @@ component MiiAdapter : IEthernetMedia
 	// Four application cycles preserve the existing MAC synchronous-RAM byte cadence.
 	byteSlot: logic[2]
 
-	// Two-stage completion synchronization and one-cycle MAC terminal events.
-	acknowledgeMeta: bool
-	acknowledgeSync: bool
+	// Coherent completion mailbox and one-cycle MAC terminal events.
 	terminal: bool
 	terminalFault: bool
 
@@ -89,6 +88,7 @@ component MiiAdapter : IEthernetMedia
 		receive = new MiiReceiver(receiveDomain, pins.rxData, pins.rxValid, pins.rxError, rxQueue.writeReady)
 		transmit = new MiiTransmitter(transmitDomain, commit, discard,
 			txQueue.readValid, txQueue.readData)
+		completion = new MiiCompletionReceiver(context, transmit)
 	}
 
 	/**
@@ -140,11 +140,11 @@ component MiiAdapter : IEthernetMedia
 					lateAbort = true
 				}
 
-				if (acknowledgeSync == commit) {
+				if (completion.acknowledged == commit) {
 					busy = false
 					count = 0
 					terminal = true
-					terminalFault = transmit.fault || discard || lateAbort
+					terminalFault = completion.fault || discard || lateAbort
 					discard = false
 					lateAbort = false
 				}
@@ -166,9 +166,6 @@ component MiiAdapter : IEthernetMedia
 				count++
 			}
 
-			var previous = acknowledgeMeta
-			acknowledgeMeta = transmit.acknowledged
-			acknowledgeSync = previous
 		}
 	}
 }

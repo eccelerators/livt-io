@@ -1,0 +1,36 @@
+namespace Livt.IO
+
+/**
+ * Receives the PHY completion toggle and its held fault payload in the MAC domain.
+ * The transmitter holds both until another committed frame completes. The MAC
+ * must not commit another frame until this acknowledgement has been consumed.
+ * Both domains assert reset together; release is local to each clock.
+ * Physical CDC constraints and synchronizer placement remain board obligations.
+ */
+component MiiCompletionReceiver
+{
+    source: MiiTransmitter
+    meta: bool
+    synchronized: bool
+    public acknowledged: out bool
+    public fault: out bool
+
+    new(domain: IContext, source: MiiTransmitter)
+    {
+        context = domain
+        this.source = source
+    }
+
+    process Receive()
+    {
+        state {
+            if (synchronized != acknowledged) {
+                fault = cross source.fault
+                acknowledged = synchronized
+            }
+            var previous = meta
+            meta = cross source.acknowledged
+            synchronized = previous
+        }
+    }
+}

@@ -7,7 +7,7 @@ can depend on `Livt.IO` instead of separate `Ram` or `Uart` packages.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and migration details.
 
-Version 1.7.0 provides the following hardware components and contracts:
+Version 1.8.0 provides the following hardware components and contracts:
 
 - `Livt.IO.IReadOnlyBlockDevice` / `BlockReadState`: transport-independent, retained block reads with explicit cancellation and release.
 - `Livt.IO.SequentialRam<T, CAPACITY, STYLE>`: compact scheduled storage requiring sequential calls; no internal arbitration. Defaults to block RAM.
@@ -38,6 +38,7 @@ Version 1.7.0 provides the following hardware components and contracts:
 - `Livt.IO.EthernetReceiver` / `EthernetTransmitter`: RAM-backed Ethernet frame reception and transmission.
 - `Livt.IO.RmiiAdapter<ENABLE_10>`: full-duplex RMII media adapter; 100 Mbit/s by default, optional 10 Mbit/s.
 - `Livt.IO.MiiAdapter`: full-duplex 10/100 Mbit/s MII with independent RX/TX clocks.
+- `Livt.IO.MiiCompletionReceiver`: user-implemented PHY-to-MAC completion CDC using Livt's `cross` marker.
 - `Livt.IO.Phy.Dp83848Phy`: DP83848 identification, MII configuration, and 10/100-full link management.
 - `Livt.IO.MdioController`: serialized Clause 22 PHY register access.
 - `Livt.IO.Phy.Rtl8201Phy` / `Rtl8211Phy`: PHY configuration and link monitoring.
@@ -50,25 +51,28 @@ Version 1.7.0 provides the following hardware components and contracts:
 
 ```toml
 [dependencies]
-"Livt.IO" = "1.7.0"
+"Livt.IO" = "1.8.0"
 ```
 
 `Livt.IO` is part of the official Livt base library package set. New packages
 should depend on `Livt.IO`; `Livt.IO` supersedes the standalone `Ram` and `Uart` packages for new code.
 
-## New in 1.7.0
+## New in 1.8.0
 
-`IReadOnlyBlockDevice` separates block consumers from the transport supplying the
-media. One accepted read owns a retained block until explicit release. Only
-successful completion exposes bytes; consumers can pause between reads without
-losing data. `BlockReadState` distinguishes Idle, Active, Complete and Failed.
+`MiiCompletionReceiver` encapsulates the MII transmitter-to-MAC completion
+crossing. It uses Livt's `cross` keyword at the two intentional raw boundaries,
+then implements the completion protocol in Livt: the acknowledgement passes
+through two MAC-domain sampling stages and the matching held fault payload is
+published with it on the following edge.
 
-The contract exposes media geometry, read acceptance, completion, byte access,
-cancellation and release. It does not prescribe a sector size, storage backend or
-fixed call latency. Providers and consumers share one clock/reset context and
-serialize scheduled calls. See [read-only block storage](docs/block-storage.md).
+`MiiAdapter` owns this receiver, so applications continue to use the existing
+media interface without handling the crossing themselves. The compiler does not
+insert a second synchronization transaction for `cross`; physical placement,
+timing constraints and CDC sign-off remain integration responsibilities. See
+[MII integration](docs/mii.md) for the protocol and reset contract.
 
-Existing APIs and the `Livt.Collections 1.4.0` dependency remain unchanged.
+Existing consumer APIs and the `Livt.Collections 1.4.0` dependency remain
+unchanged. Building this release requires a Livt compiler with `cross` support.
 
 ## 📚 Namespaces
 
@@ -111,6 +115,7 @@ in `Livt.IO`.
 | `EthernetTransmitter<CAPACITY>` | Yes | Buffered frame transmission, padding, FCS and retained completion |
 | `RmiiAdapter<ENABLE_10>` | Yes | RMII serialization and byte assembly; optional 10 Mbit/s mode |
 | `MiiAdapter` | Yes | 10/100 Mbit/s full-duplex MII with complete-frame TX buffering and asynchronous FIFOs |
+| `MiiCompletionReceiver` | Yes | Coherent user-implemented crossing of the held MII completion toggle and fault payload into the MAC context |
 | `Phy.Dp83848Phy<PHY_ADDRESS, POLL>` | Yes | DP83848 identification, MII selection, negotiation and link monitoring |
 | `MdioController` | Yes | Clause 22 MDIO register reads and writes |
 | `Phy.Rtl8201Phy<PHY_ADDRESS, POLL>` | Yes | RTL8201F configuration and 100-full link monitoring |

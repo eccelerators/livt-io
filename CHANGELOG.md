@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.8.0
+
+### Added
+
+- `MiiCompletionReceiver`: a Livt implementation of the PHY-to-MAC completion
+  crossing using the `cross` keyword for its intentional raw context boundaries.
+- Bounded native regression coverage for the completion stage count, coherent
+  acknowledgement/fault association, 25 MHz and 2.5 MHz PHY clocks, an
+  independent non-harmonic clock, clock pauses and coordinated reset.
+
+### Changed
+
+- `MiiAdapter` now consumes the completion receiver's MAC-domain outputs instead
+  of directly reading transmitter-domain status. Completion control passes
+  through two sampling stages; the held fault payload is published with the
+  matching acknowledgement on the following MAC edge.
+- Document the custom CDC protocol, compiler behavior, reset assumptions and
+  physical integration responsibilities for MII.
+
+### Compatibility and dependencies
+
+- Existing `MiiAdapter`, Ethernet, memory, UART, I2C and SPI consumer APIs remain
+  unchanged. Continue to use `Livt.Collections 1.4.0`.
+- Building this release requires a Livt compiler with `cross` support. `cross`
+  preserves the direct boundary for the user-implemented CDC mechanism; it does
+  not add compiler-generated synchronization hardware or timing constraints.
+- Integrators remain responsible for synchronizer placement, CDC constraints and
+  physical sign-off. Both MII domains must assert reset together, and no new
+  frame may be committed until the previous completion has been consumed.
+
 ## 1.7.0
 
 ### Added

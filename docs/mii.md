@@ -52,6 +52,23 @@ finish the frame without sampling changing metadata. Completion reports failure
 for that transaction; the next frame starts with cleared local failure state. Reset is required to recover if a PHY
 clock permanently stops before acknowledging completion.
 
+The PHY-to-MAC completion boundary is encapsulated in `MiiCompletionReceiver`.
+It uses `cross` only on the raw transmitter acknowledgement and fault reads;
+applications consume the receiver's same-context outputs normally. The
+transmitter holds the fault payload while its completion toggle crosses two
+MAC-clock sampling stages. The receiver publishes the matching acknowledgement
+and fault together on the following MAC edge. The adapter then handles its
+normal frame-completion logic; this three-edge receiver contract is not a
+three-edge end-to-end `txDone` guarantee. No new frame is committed until the
+previous completion is consumed. Both domains must reset together.
+
+The compiler does not add a second handshake for these `cross` reads. The
+component implements the protocol, and the integrator still owns its physical
+CDC constraints. This implementation requires a compiler supporting `cross`.
+The [native completion regression](../validation/mii-completion/README.md)
+checks stage count, fault association, clock pauses and reset. The ordinary
+MII tests exercise the full adapter at both rates, repeated frames and aborts.
+
 RX cannot backpressure the PHY. Odd nibble counts, RX_ER, or FIFO overflow mark
 the frame bad; a terminating error token prevents joining it to the next frame.
 The existing MAC validates preamble/FCS, length, and destination filtering.
